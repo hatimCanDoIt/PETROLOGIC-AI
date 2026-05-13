@@ -1,0 +1,32 @@
+# Dev overrides: hot-reload server with volume mount, Vite dev server.
+# Use:  docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  server:
+    command:
+      [
+        "sh",
+        "-c",
+        "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+      ]
+    volumes:
+      - ./server:/app
+    environment:
+      DATABASE_URL: postgresql+asyncpg://petrologic:petrologic@db:5432/petrologic
+
+  client:
+    # Run the Vite dev server instead of the nginx build
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./client:/app
+    command:
+      [
+        "sh",
+        "-c",
+        "corepack enable && pnpm install && pnpm dev --host 0.0.0.0 --port 5173",
+      ]
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000

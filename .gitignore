@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# Env
+.env
+.env.local
+.env.*.local
+server/.env
+client/.env
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+_test_petrologic.sqlite
+*.sqlite
+*.sqlite3
+
+# Builds
+/build/

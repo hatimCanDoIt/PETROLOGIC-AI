@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+  }
+
+  body {
+    background-color: #03080f;
+    color: #b8d4e8;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Subtle scan-line overlay across the whole app */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(0, 212, 255, 0.015) 0,
+      rgba(0, 212, 255, 0.015) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 1;
+  }
+
+  /* Dark scrollbars */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: #050d17;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #162840;
+    border-radius: 4px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #1e3a5f;
+  }
+
+  /* Focus rings: cyan, no offset that bleeds onto dark panels */
+  *:focus-visible {
+    outline: 2px solid rgba(0, 212, 255, 0.65);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .panel {
+    background-color: #081422;
+    border: 1px solid #162840;
+    border-radius: 0.5rem;
+  }
+
+  .panel-deep {
+    background-color: #050d17;
+    border: 1px solid #162840;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid #162840;
+    background-color: rgba(8, 20, 34, 0.6);
+    border-radius: 9999px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: #b8d4e8;
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(22, 40, 64, 0.4) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(22, 40, 64, 0.4) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+}
+
+/* Tooltip helpers */
+#tooltip {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.7rem;
+  background: rgba(5, 13, 23, 0.95);
+  border: 1px solid #162840;
+  color: #b8d4e8;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.4rem;
+  box-shadow: 0 0 22px rgba(0, 212, 255, 0.12);
+  display: none;
+  white-space: nowrap;
+  min-width: 120px;
+}
+#tooltip.visible {
+  display: block;
+}
