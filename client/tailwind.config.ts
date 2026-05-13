@@ -1,22 +1,24 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
         bg: {
-          DEFAULT: '#03080f',
-          panel: '#081422',
-          deep: '#050d17',
+          DEFAULT: 'var(--c-bg)',
+          panel: 'var(--c-panel)',
+          deep: 'var(--c-deep)',
         },
         border: {
-          DEFAULT: '#162840',
-          light: '#1e3a5f',
+          DEFAULT: 'var(--c-border)',
+          light: 'var(--c-border-light)',
+          muted: 'var(--c-muted-border)',
         },
         accent: {
-          DEFAULT: '#00d4ff',
-          dim: '#0099bb',
+          DEFAULT: 'var(--c-accent)',
+          dim: 'var(--c-accent-dim)',
         },
         oil: {
           DEFAULT: '#f5a623',
@@ -35,24 +37,27 @@ const config: Config = {
           dim: '#2563eb',
         },
         text: {
-          DEFAULT: '#b8d4e8',
-          dim: '#4a6680',
-          bright: '#e8f4ff',
+          DEFAULT: 'var(--c-text)',
+          dim: 'var(--c-text-dim)',
+          bright: 'var(--c-text-bright)',
+          faint: 'color-mix(in srgb, var(--c-text-dim) 70%, transparent)',
+          softer: 'color-mix(in srgb, var(--c-text-dim) 60%, transparent)',
+          subtle80: 'color-mix(in srgb, var(--c-text-dim) 82%, transparent)',
         },
       },
       fontFamily: {
-        mono: ["'Space Mono'", 'monospace'],
-        sans: ["'IBM Plex Sans'", 'sans-serif'],
-        display: ["'Orbitron'", 'monospace'],
+        sans: ["'IBM Plex Sans'", 'system-ui', 'sans-serif'],
+        display: ["'IBM Plex Sans'", 'system-ui', 'sans-serif'],
+        mono: ["'IBM Plex Mono'", 'ui-monospace', 'monospace'],
       },
       boxShadow: {
-        'glow-accent': '0 0 18px rgba(0, 212, 255, 0.18)',
+        'glow-accent': '0 0 22px color-mix(in srgb, var(--c-accent) 22%, transparent)',
         'glow-oil': '0 0 18px rgba(245, 166, 35, 0.18)',
         'glow-gas': '0 0 18px rgba(255, 61, 90, 0.18)',
       },
       backgroundImage: {
         'grid-faint':
-          'linear-gradient(rgba(22,40,64,0.18) 1px, transparent 1px),linear-gradient(90deg,rgba(22,40,64,0.18) 1px, transparent 1px)',
+          'linear-gradient(rgb(228 228 231 / 0.35) 1px, transparent 1px),linear-gradient(90deg,rgb(228 228 231 / 0.35) 1px, transparent 1px)',
       },
     },
   },

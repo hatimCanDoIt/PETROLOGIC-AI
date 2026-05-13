@@ -116,6 +116,8 @@ async def me(
         provider=current_user.provider,
         created_at=current_user.created_at,
         well_count=well_count,
+        billing_plan=current_user.billing_plan,
+        billing_status=current_user.billing_status,
     )
 
 

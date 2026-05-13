@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, extractErrorMessage } from '@/api/client'
-import type { WellDetail, WellStats, WellSummary } from '@/types'
+import type { PetroParams, WellDetail, WellStats, WellSummary } from '@/types'
 
 export function useWells() {
   return useQuery({
@@ -87,21 +87,7 @@ export function useDeleteWell() {
 export function useReanalyzeWell(wellId: string | undefined) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (params: Partial<{
-      rho_ma: number
-      rho_fl: number
-      Rw: number
-      a: number
-      m: number
-      n: number
-      GR_clean: number | null
-      GR_shale: number | null
-      Rt_cutoff: number
-      Shc_cutoff: number
-      phi_cutoff: number
-      Vsh_cutoff: number
-      Sw_producible: number
-    }>) => {
+    mutationFn: async (params: Partial<PetroParams>) => {
       if (!wellId) throw new Error('No well id')
       try {
         const { data } = await api.post<WellDetail>(

@@ -23,7 +23,7 @@ export default function SkeletonTrack({
         className="absolute inset-0"
         style={{
           background:
-            'linear-gradient(110deg, rgba(22,40,64,0.0) 8%, rgba(22,40,64,0.55) 18%, rgba(22,40,64,0.0) 33%)',
+            'linear-gradient(110deg, rgba(207,196,180,0) 8%, rgba(207,196,180,0.6) 18%, rgba(207,196,180,0) 33%)',
           backgroundSize: '200% 100%',
           animation: 'shimmer 1.6s linear infinite',
         }}

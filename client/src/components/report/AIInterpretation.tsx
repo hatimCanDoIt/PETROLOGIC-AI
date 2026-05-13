@@ -57,7 +57,7 @@ function ZoneAccordion({
         </svg>
       </button>
       {open && (
-        <div className="px-4 py-3 space-y-3 bg-bg-panel/60">
+        <div className="px-4 py-3 space-y-3 surface-column-muted">
           <p className="text-sm text-text">{z.interpretation}</p>
           {z.producibility_assessment && (
             <p className="text-sm text-text-bright">

@@ -1,13 +1,14 @@
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
+import LandingTour from '@/components/landing/LandingTour'
 import Logo from '@/components/layout/Logo'
 
 const FEATURES = [
   {
     title: 'LAS File Analysis',
     body: 'Upload any LAS 2.0 file and we parse it instantly — gamma ray, resistivity, neutron, density, PEF, all mnemonic aliases supported.',
-    accent: 'rgba(0,212,255,0.65)',
+    accent: 'rgba(2,132,199,0.45)',
   },
   {
     title: 'Deterministic Engine',
@@ -24,12 +25,11 @@ const FEATURES = [
 export default function Landing() {
   return (
     <div className="relative min-h-screen overflow-hidden">
-      {/* animated subtle grid */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(0,212,255,0.04) 1px, transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.04) 1px, transparent 1px)',
+            'linear-gradient(rgb(226 232 240 / 0.45) 1px, transparent 1px),linear-gradient(90deg,rgb(226 232 240 / 0.45) 1px, transparent 1px)',
           backgroundSize: '60px 60px',
           animation: 'gridfade 16s ease-in-out infinite',
         }}
@@ -38,7 +38,7 @@ export default function Landing() {
         className="pointer-events-none absolute -top-40 -left-40 h-[40rem] w-[40rem] rounded-full"
         style={{
           background:
-            'radial-gradient(circle, rgba(0,212,255,0.18) 0%, transparent 60%)',
+            'radial-gradient(circle, rgb(14 165 233 / 0.1) 0%, transparent 60%)',
           filter: 'blur(40px)',
         }}
       />
@@ -46,18 +46,20 @@ export default function Landing() {
         className="pointer-events-none absolute -bottom-40 -right-40 h-[40rem] w-[40rem] rounded-full"
         style={{
           background:
-            'radial-gradient(circle, rgba(245,166,35,0.15) 0%, transparent 60%)',
+            'radial-gradient(circle, rgba(245,166,35,0.12) 0%, transparent 60%)',
           filter: 'blur(60px)',
         }}
       />
       <style>
-        {`@keyframes gridfade { 0%,100% { opacity: 0.65 } 50% { opacity: 1 } }`}
+        {`@keyframes gridfade { 0%,100% { opacity: 0.55 } 50% { opacity: 0.95 } }`}
       </style>
 
-      {/* Top bar */}
       <header className="relative z-10 flex items-center justify-between px-8 py-6">
         <Logo size={32} />
-        <nav className="hidden md:flex items-center gap-6 font-mono text-xs uppercase tracking-widest text-text-dim">
+        <nav
+          data-tour="nav-features"
+          className="hidden md:flex items-center gap-6 font-mono text-xs uppercase tracking-widest text-text-dim"
+        >
           <a href="#features" className="hover:text-accent transition-colors">
             Features
           </a>
@@ -70,13 +72,12 @@ export default function Landing() {
         </nav>
       </header>
 
-      {/* Hero */}
       <main className="relative z-10 mx-auto flex max-w-6xl flex-col items-center px-6 py-16 text-center">
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-panel/60 px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-text-dim"
+          className="inline-flex items-center gap-2 rounded-full border border-border surface-column-muted px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-text-dim"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-reservoir animate-pulse" />
           Built for the energy industry
@@ -89,7 +90,10 @@ export default function Landing() {
           className="mt-8 font-display text-5xl md:text-7xl tracking-[0.05em] text-text-bright"
         >
           AI-Powered{' '}
-          <span className="text-accent" style={{ textShadow: '0 0 32px rgba(0,212,255,0.45)' }}>
+          <span
+            className="text-accent"
+            style={{ textShadow: '0 12px 40px rgb(2 132 199 / 0.18)' }}
+          >
             Well Log
           </span>{' '}
           Analysis
@@ -101,34 +105,36 @@ export default function Landing() {
           transition={{ duration: 0.7, delay: 0.15 }}
           className="mt-6 max-w-2xl text-lg text-text"
         >
-          Detect hydrocarbons. Prove producibility. PETROLOGIC AI parses your LAS
-          files, runs a deterministic petrophysical engine, then asks Claude to
-          interpret what the numbers actually mean.
+          Detect hydrocarbons. Prove producibility. PETROLOGIC AI parses your LAS files, runs a
+          deterministic petrophysical engine, then asks Claude to interpret what the numbers
+          actually mean.
         </motion.p>
 
-        <motion.div
-          initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.25 }}
-          className="mt-10 flex flex-col sm:flex-row items-center gap-3"
-        >
-          <Link
-            to="/register"
-            className="inline-flex h-12 items-center justify-center rounded-md bg-accent px-7 font-semibold tracking-wider text-bg shadow-glow-accent transition-all hover:bg-accent-dim"
+        <div data-tour="cta-register">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.25 }}
+            className="mt-10 flex flex-col sm:flex-row items-center gap-3"
           >
-            Start Free
-          </Link>
-          <Link
-            to="/login"
-            className="inline-flex h-12 items-center justify-center rounded-md border border-accent bg-transparent px-7 font-semibold tracking-wider text-accent transition-all hover:bg-accent/10"
-          >
-            Sign In
-          </Link>
-        </motion.div>
+            <Link
+              to="/register"
+              className="inline-flex h-12 items-center justify-center rounded-md bg-accent px-7 font-semibold tracking-wider text-white shadow-glow-accent transition-all hover:bg-accent-dim"
+            >
+              Start Free
+            </Link>
+            <Link
+              to="/login"
+              className="inline-flex h-12 items-center justify-center rounded-md border border-accent bg-transparent px-7 font-semibold tracking-wider text-accent transition-all hover:bg-accent/10"
+            >
+              Sign In
+            </Link>
+          </motion.div>
+        </div>
 
-        {/* Feature cards */}
         <section
           id="features"
+          data-tour="section-features"
           className="mt-24 grid w-full grid-cols-1 gap-5 md:grid-cols-3"
         >
           {FEATURES.map((f, i) => (
@@ -155,35 +161,34 @@ export default function Landing() {
 
         <section
           id="methodology"
+          data-tour="methodology-section"
           className="mt-24 w-full panel p-8 text-left"
         >
-          <h2 className="font-display text-xl uppercase tracking-widest text-accent">
-            How it works
-          </h2>
+          <h2 className="font-display text-xl uppercase tracking-widest text-accent">How it works</h2>
           <ol className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 font-mono text-xs uppercase tracking-widest text-text-dim">
             <li>
               <span className="text-accent">01 ·</span> Upload LAS file
             </li>
             <li>
-              <span className="text-accent">02 ·</span> Deterministic engine
-              computes Sw, Vsh, ϕ, picks zones
+              <span className="text-accent">02 ·</span> Deterministic engine computes Sw, Vsh, ϕ,
+              picks zones
             </li>
             <li>
-              <span className="text-accent">03 ·</span> Claude interprets the
-              numbers
+              <span className="text-accent">03 ·</span> Claude interprets the numbers
             </li>
             <li>
-              <span className="text-accent">04 ·</span> Validate with your
-              petrophysicist
+              <span className="text-accent">04 ·</span> Validate with your petrophysicist
             </li>
           </ol>
         </section>
       </main>
 
       <footer className="relative z-10 border-t border-border mt-16 px-6 py-6 text-center text-xs text-text-dim font-mono">
-        PETROLOGIC AI &middot; Built for the energy industry &middot; Results require
-        validation by a licensed petrophysicist
+        PETROLOGIC AI &middot; Built for the energy industry &middot; Results require validation by a
+        licensed petrophysicist
       </footer>
+
+      <LandingTour />
     </div>
   )
 }

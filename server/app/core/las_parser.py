@@ -26,19 +26,70 @@ class LASParseError(ValueError):
     """Raised when a LAS file cannot be parsed or fails validation."""
 
 
-# Mnemonic aliases — first match wins
+# Mnemonic aliases — first match wins per family
 CURVE_ALIASES: dict[str, list[str]] = {
     "GR": ["GR", "ECGR", "CGR", "HGR", "GRD", "GRGC", "SGR"],
+    # Array induction / deep resistivity (vendor-specific order:
+    # prefer mid-array AF30 / AT30 before very shallow A10/A20, then deep 90 / ILD).
     "RT": [
-        "AF90", "AT90", "AHT90", "AO90",
-        "ILD", "LLD", "RT", "RILD", "RLLD", "RD",
-        "AF60", "AT60",
+        "AF30",
+        "AT30",
+        "AO30",
+        "AF60",
+        "AT60",
+        "AO60",
+        "AF90",
+        "AT90",
+        "AO90",
+        "AHT90",
+        "AF10",
+        "AT10",
+        "AO10",
+        "AF20",
+        "AT20",
+        "AO20",
+        "ILD",
+        "LLD",
+        "RT",
+        "RILD",
+        "RLLD",
+        "RD",
     ],
-    "NPHI": ["NPHI", "TNPH", "HNPO", "HTNP", "NPOR", "CNL", "PHIN"],
+    "NPHI": [
+        "NPHI",
+        "TNPH",
+        "HNPO",
+        "HTNP",
+        "NPOR",
+        "CNL",
+        "PHIN",
+    ],
     "RHOZ": ["RHOZ", "RHOB", "DEN", "ZDEN", "DENS", "RHO", "RHOM"],
     "PEF": ["PEFZ", "PEF", "PE", "PDPE", "PE8"],
     "SP": ["SP", "ASFI", "SPONT", "SPR"],
     "CALI": ["HCAL", "CALI", "DCAL", "CAL", "CALR", "CALS"],
+    # ELAN / GeoFrame effective porosity already solved on the file
+    "PHI_INPUT": [
+        "PIGN",
+        "PHIE",
+        "PHIT",
+        "TPHI",
+        "PHIC",
+        "PHIE_M",
+    ],
+    # Processed water saturation — avoids failing uploads that only carry RST/sigma Sw
+    "SW_INPUT": [
+        "SUWI",
+        "SW",
+        "SXWI",
+        "SXOT",
+        "SWDS",
+        "SWM",
+        "SWE",
+        "SWT",
+    ],
+    # Gas / CO2 indicators (RST, ELAN) — augments NPHI–DPHI gas crossover
+    "GAS_FLAG": ["VXGA", "SXGA", "XGAS", "SBOG"],
 }
 
 
@@ -241,16 +292,27 @@ def validate_curves(las_data: LASData) -> dict:
     pef = _find_mnemonic(cols, CURVE_ALIASES["PEF"])
     sp = _find_mnemonic(cols, CURVE_ALIASES["SP"])
     cali = _find_mnemonic(cols, CURVE_ALIASES["CALI"])
+    phi_in = _find_mnemonic(cols, CURVE_ALIASES["PHI_INPUT"])
+    sw_in = _find_mnemonic(cols, CURVE_ALIASES["SW_INPUT"])
+    gas_flag = _find_mnemonic(cols, CURVE_ALIASES["GAS_FLAG"])
 
     missing_critical: list[str] = []
     warnings: list[str] = []
 
     if gr is None:
         missing_critical.append("GR (gamma ray)")
-    if rt is None:
-        missing_critical.append("RT (resistivity)")
-    if nphi is None and rhoz is None:
-        missing_critical.append("NPHI or RHOZ (need at least one porosity log)")
+
+    has_phi = nphi is not None or rhoz is not None or phi_in is not None
+    if not has_phi:
+        missing_critical.append(
+            "NPHI or RHOZ or processed porosity (e.g. PIGN, PHIT, PHIC, TPHI)"
+        )
+
+    # Need either a resistivity log (for Archie) or processed water saturation (RST/ELAN).
+    if rt is None and sw_in is None:
+        missing_critical.append(
+            "RT (resistivity) or processed Sw (e.g. SUWI, SW, SXWI)"
+        )
 
     if pef is None:
         warnings.append("PEF missing — lithology classification will be uncertain.")
@@ -258,6 +320,19 @@ def validate_curves(las_data: LASData) -> dict:
         warnings.append("SP missing.")
     if cali is None:
         warnings.append("Caliper missing — cannot QC borehole condition.")
+    if phi_in is not None:
+        warnings.append(
+            f"Using processed porosity curve {phi_in} where present (ELAN / vendor)."
+        )
+    if sw_in is not None:
+        warnings.append(
+            f"Using processed water saturation {sw_in} where present "
+            "( RST / sigma / ELAN ); Archie Sw fills gaps only."
+        )
+    if rt is None and sw_in is not None:
+        warnings.append("No deep resistivity — saturation driven by processed Sw curve.")
+    if gas_flag is not None:
+        warnings.append(f"Optional gas indicator curve present: {gas_flag}.")
 
     return {
         "has_gr": gr is not None,
@@ -267,6 +342,9 @@ def validate_curves(las_data: LASData) -> dict:
         "has_pef": pef is not None,
         "has_sp": sp is not None,
         "has_caliper": cali is not None,
+        "has_phi_input": phi_in is not None,
+        "has_sw_input": sw_in is not None,
+        "has_gas_flag": gas_flag is not None,
         "gr_mnemonic": gr,
         "rt_mnemonic": rt,
         "nphi_mnemonic": nphi,
@@ -274,6 +352,9 @@ def validate_curves(las_data: LASData) -> dict:
         "pef_mnemonic": pef,
         "sp_mnemonic": sp,
         "cali_mnemonic": cali,
+        "phi_input_mnemonic": phi_in,
+        "sw_input_mnemonic": sw_in,
+        "gas_flag_mnemonic": gas_flag,
         "missing_critical": missing_critical,
         "warnings": warnings,
     }
@@ -290,6 +371,9 @@ def auto_select_curves(df: pd.DataFrame, validation: dict) -> dict:
         ("PEF", "pef_mnemonic"),
         ("SP", "sp_mnemonic"),
         ("CALI", "cali_mnemonic"),
+        ("PHI_INPUT", "phi_input_mnemonic"),
+        ("SW_INPUT", "sw_input_mnemonic"),
+        ("GAS_FLAG", "gas_flag_mnemonic"),
     ):
         mnem = validation.get(key)
         if mnem and mnem in df.columns:

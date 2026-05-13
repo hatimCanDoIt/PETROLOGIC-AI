@@ -126,6 +126,43 @@ def test_hc_detection_finds_zone():
     assert z["thick_ft"] >= 15.0
 
 
+def test_zone_survives_isolated_nphi_null():
+    """A single -999 (→NaN) NPHI sample inside a contiguous oil interval must
+    not punch a hole into the HC zone — phi_eff falls back to DPHI and the
+    petrophysics is still well-defined at that depth.
+    Regression for the "2-ft anomaly" bug reported on real wells.
+    """
+    depth = np.arange(8000.0, 8050.0, 0.5)
+    n = len(depth)
+    GR = np.full(n, 110.0)
+    NPHI = np.full(n, 0.35)
+    RHOZ = np.full(n, 2.55)
+    RT = np.full(n, 2.0)
+    pay = (depth >= 8020.0) & (depth < 8040.0)
+    GR[pay] = 20.0
+    NPHI[pay] = 0.20
+    RHOZ[pay] = 2.40
+    RT[pay] = 60.0
+
+    # Simulate a -999 NPHI null in the middle of the pay (parser would map -999 → NaN)
+    null_idx = np.argmin(np.abs(depth - 8030.0))
+    NPHI[null_idx] = np.nan
+    NPHI[null_idx + 1] = np.nan  # 2-sample (1-ft) gap
+
+    df = _df(DEPT=depth, GR=GR, NPHI=NPHI, RHOZ=RHOZ, RT=RT, PEF=np.full(n, 2.0))
+    cm = {"GR": "GR", "NPHI": "NPHI", "RHOZ": "RHOZ", "RT": "RT", "PEF": "PEF"}
+    p = PetroParams(rho_ma=2.71, rho_fl=1.0, Rw=0.1, GR_clean=20.0, GR_shale=110.0)
+    res = run_petrophysics(df, cm, p)
+
+    # The pay should be detected as a SINGLE contiguous zone, not split in two.
+    assert len(res.zones) == 1, (
+        f"Expected one contiguous HC zone, got {len(res.zones)}: {res.zones}"
+    )
+    z = res.zones[0]
+    assert z["top_ft"] <= 8021.0
+    assert z["bot_ft"] >= 8039.0
+
+
 def test_interval_finding_contiguous_mask():
     """Synthetic mask runs are converted to correct top/bot/thickness."""
     # We test indirectly by running the engine with crafted data
@@ -149,6 +186,90 @@ def test_interval_finding_contiguous_mask():
 # ---------------------------------------------------------------------------
 
 
+def test_auto_estimates_rho_ma_in_limestone_section():
+    """When rho_ma is left as None the engine should recover a sensible matrix
+    density from clean low-Vsh samples (limestone ≈ 2.71 g/cc here)."""
+    depth = np.arange(0, 500, 0.5)
+    n = len(depth)
+    # Synthetic limestone, ~15% neutron porosity, density ≈ 2.71 - 0.15*1.71
+    NPHI = np.full(n, 0.15) + np.random.default_rng(0).normal(0, 0.005, n)
+    RHOZ = np.full(n, 2.71 - 0.15 * 1.71) + np.random.default_rng(1).normal(0, 0.01, n)
+    GR = np.full(n, 25.0)  # very clean
+    RT = np.full(n, 5.0)
+    df = _df(DEPT=depth, GR=GR, NPHI=NPHI, RHOZ=RHOZ, RT=RT)
+    cm = {"GR": "GR", "NPHI": "NPHI", "RHOZ": "RHOZ", "RT": "RT"}
+    res = run_petrophysics(df, cm, PetroParams(GR_clean=20.0, GR_shale=110.0))
+    assert res.rho_ma_auto is True
+    assert res.params_used.rho_ma == pytest.approx(2.71, abs=0.05)
+
+
+def test_auto_estimates_rw_in_wet_zone():
+    """In a clean porous water-bearing section, Rw_auto should be close to the
+    real Rw used to generate the resistivity."""
+    rng = np.random.default_rng(42)
+    depth = np.arange(0, 500, 0.5)
+    n = len(depth)
+    phi_true = 0.20
+    Rw_true = 0.05
+    # Archie with Sw=1: RT = Rw / phi^m
+    RT = np.full(n, Rw_true / phi_true**2) * np.exp(rng.normal(0, 0.05, n))
+    NPHI = np.full(n, phi_true) + rng.normal(0, 0.005, n)
+    RHOZ = np.full(n, 2.71 - phi_true * 1.71) + rng.normal(0, 0.005, n)
+    GR = np.full(n, 25.0)
+    df = _df(DEPT=depth, GR=GR, NPHI=NPHI, RHOZ=RHOZ, RT=RT)
+    cm = {"GR": "GR", "NPHI": "NPHI", "RHOZ": "RHOZ", "RT": "RT"}
+    res = run_petrophysics(
+        df,
+        cm,
+        PetroParams(rho_ma=2.71, GR_clean=20.0, GR_shale=110.0),
+    )
+    assert res.Rw_auto is True
+    # Should be within a factor of 2 of the true Rw
+    assert 0.5 * Rw_true <= res.params_used.Rw <= 2.0 * Rw_true
+
+
+def test_sp_filter_excludes_impermeable_zone():
+    """SP that stays at the shale baseline should disqualify an HC zone even
+    when GR/RT/phi alone would have flagged it."""
+    rng = np.random.default_rng(7)
+    depth = np.arange(8000.0, 8050.0, 0.5)
+    n = len(depth)
+    GR = np.full(n, 110.0)
+    NPHI = np.full(n, 0.35)
+    RHOZ = np.full(n, 2.55)
+    RT = np.full(n, 2.0)
+    # Looks like reservoir on resistivity/porosity/Vsh
+    pay = (depth >= 8020.0) & (depth < 8040.0)
+    GR[pay] = 20.0
+    NPHI[pay] = 0.20
+    RHOZ[pay] = 2.40
+    RT[pay] = 60.0
+    # ...but SP stays flat at the shale baseline (no deflection over the "pay")
+    SP_shale = -10.0
+    SP_sand = -90.0
+    SP = np.where(GR > 80, SP_shale, SP_shale)  # always at baseline
+    SP += rng.normal(0, 0.5, n)
+    # Add a few clean sand reference samples elsewhere so the sand line is detected
+    sand_ref = (depth >= 8000.0) & (depth < 8005.0)
+    GR[sand_ref] = 20.0
+    NPHI[sand_ref] = 0.20
+    RHOZ[sand_ref] = 2.40
+    RT[sand_ref] = 60.0
+    SP[sand_ref] = SP_sand
+
+    df = _df(DEPT=depth, GR=GR, NPHI=NPHI, RHOZ=RHOZ, RT=RT, SP=SP, PEF=np.full(n, 2.0))
+    cm = {"GR": "GR", "NPHI": "NPHI", "RHOZ": "RHOZ", "RT": "RT", "SP": "SP", "PEF": "PEF"}
+    p = PetroParams(rho_ma=2.71, Rw=0.1, GR_clean=20.0, GR_shale=110.0)
+    res = run_petrophysics(df, cm, p)
+
+    assert res.sp_used is True
+    # Pay interval (8020-8040) was kept impermeable by SP → should not be detected
+    pay_zones = [z for z in res.zones if z["top_ft"] >= 8015 and z["bot_ft"] <= 8045]
+    assert pay_zones == [], (
+        f"SP-impermeable interval should not be flagged as HC: {pay_zones}"
+    )
+
+
 def test_pipeline_on_synthetic_las(synthetic_las_bytes):
     data = parse_las(synthetic_las_bytes)
     v = validate_curves(data)
@@ -158,3 +279,29 @@ def test_pipeline_on_synthetic_las(synthetic_las_bytes):
     # Our oil zone is around 8050-8090; carbonate gas zone 8120-8170
     found_types = {z["type"] for z in res.zones}
     assert found_types & {"OIL", "GAS"}
+
+
+def test_rst_style_processed_sw_without_rt():
+    """Sigma / RST exports may have TPHI + SW but no resistivity — still run HC detection."""
+    depth = np.arange(5000.0, 5020.0, 0.5)
+    n = len(depth)
+    GR = np.full(n, 35.0)
+    pay = (depth >= 5010.0) & (depth < 5018.0)
+    GR[pay] = 30.0
+    TPHI = np.full(n, 0.12)
+    TPHI[pay] = 0.22
+    SW = np.full(n, 0.85)
+    SW[pay] = 0.25
+
+    df = pd.DataFrame(
+        {"DEPT": depth, "GR": GR, "TPHI": TPHI, "SW": SW},
+    )
+    cm = {"GR": "GR", "PHI_INPUT": "TPHI", "SW_INPUT": "SW"}
+    res = run_petrophysics(
+        df,
+        cm,
+        PetroParams(GR_clean=15.0, GR_shale=120.0, Rw=0.1),
+    )
+    assert res.used_sw_input is True
+    assert res.used_phi_input is True
+    assert len(res.zones) >= 1

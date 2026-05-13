@@ -92,7 +92,74 @@ def _slice_result(result_arrays: dict, idx: np.ndarray) -> dict:
     return {k: v[idx] for k, v in result_arrays.items()}
 
 
-def _build_log_payload(result: PetroResult, *, overview_max: int = 3000) -> dict:
+def _persist_raw_arrays(
+    result: PetroResult,
+    *,
+    persist_las_df: Any | None,
+    curve_map: dict | None,
+) -> dict:
+    """Store original LAS columns by mnemonic so reanalysis can rebuild the DataFrame."""
+    raw: dict[str, list] = {"depth": _arr_to_list(result.depth, decimals=3)}
+    if persist_las_df is not None and curve_map:
+        seen: set[str] = set()
+        for _std, mnem in curve_map.items():
+            if not mnem or mnem in seen:
+                continue
+            seen.add(str(mnem))
+            if mnem in persist_las_df.columns:
+                raw[str(mnem)] = _arr_to_list(
+                    persist_las_df[mnem].to_numpy(dtype=np.float64),
+                    decimals=4,
+                )
+        return raw
+    raw["GR"] = _arr_to_list(result.GR, decimals=3)
+    raw["NPHI"] = _arr_to_list(result.NPHI, decimals=4)
+    raw["RHOZ"] = _arr_to_list(result.RHOZ, decimals=4)
+    raw["RT"] = _arr_to_list(result.RT, decimals=3)
+    raw["PEF"] = _arr_to_list(result.PEF, decimals=3)
+    raw["SP"] = _arr_to_list(result.SP, decimals=3)
+    return raw
+
+
+def _dataframe_from_stored_raw(raw: dict, curve_map: dict | None) -> Any:
+    """Rebuild the upload-time DataFrame from ``raw_arrays`` + ``curve_map``."""
+    import pandas as pd
+
+    def col(name: str) -> np.ndarray:
+        vals = raw.get(name) or []
+        return np.array([np.nan if v is None else v for v in vals], dtype=np.float64)
+
+    if not curve_map:
+        out = {
+            "DEPT": col("depth"),
+            "GR": col("GR"),
+            "NPHI": col("NPHI"),
+            "RHOZ": col("RHOZ"),
+            "RT": col("RT"),
+            "PEF": col("PEF"),
+        }
+        if raw.get("SP"):
+            out["SP"] = col("SP")
+        return pd.DataFrame(out)
+
+    out: dict[str, np.ndarray] = {"DEPT": col("depth")}
+    seen: set[str] = set()
+    for _std, mnem in curve_map.items():
+        if not mnem or mnem in seen:
+            continue
+        seen.add(str(mnem))
+        if str(mnem) in raw and str(mnem) != "depth":
+            out[str(mnem)] = col(str(mnem))
+    return pd.DataFrame(out)
+
+
+def _build_log_payload(
+    result: PetroResult,
+    *,
+    overview_max: int = 3000,
+    persist_las_df: Any | None = None,
+    curve_map: dict | None = None,
+) -> dict:
     """Build the on-disk log array payload for ``result_json``."""
     arrays = {
         "depth": result.depth,
@@ -102,6 +169,7 @@ def _build_log_payload(result: PetroResult, *, overview_max: int = 3000) -> dict
         "RHOZ": result.RHOZ,
         "RT": result.RT,
         "PEF": result.PEF,
+        "SP": result.SP,
         "Vsh": result.Vsh,
         "phi_eff": result.phi_eff,
         "Sw": result.Sw,
@@ -121,6 +189,7 @@ def _build_log_payload(result: PetroResult, *, overview_max: int = 3000) -> dict
         "RHOZ": _arr_to_list(arrays["RHOZ"][ov_idx], decimals=4),
         "RT": _arr_to_list(arrays["RT"][ov_idx], decimals=3),
         "PEF": _arr_to_list(arrays["PEF"][ov_idx], decimals=3),
+        "SP": _arr_to_list(arrays["SP"][ov_idx], decimals=2),
         "Vsh": _arr_to_list(arrays["Vsh"][ov_idx], decimals=4),
         "phi_eff": _arr_to_list(arrays["phi_eff"][ov_idx], decimals=4),
         "Sw": _arr_to_list(arrays["Sw"][ov_idx], decimals=4),
@@ -145,6 +214,7 @@ def _build_log_payload(result: PetroResult, *, overview_max: int = 3000) -> dict
                 "RHOZ": _arr_to_list(arrays["RHOZ"][idx], decimals=4),
                 "RT": _arr_to_list(arrays["RT"][idx], decimals=3),
                 "PEF": _arr_to_list(arrays["PEF"][idx], decimals=3),
+                "SP": _arr_to_list(arrays["SP"][idx], decimals=2),
                 "Vsh": _arr_to_list(arrays["Vsh"][idx], decimals=4),
                 "phi_eff": _arr_to_list(arrays["phi_eff"][idx], decimals=4),
                 "Sw": _arr_to_list(arrays["Sw"][idx], decimals=4),
@@ -167,15 +237,25 @@ def _build_log_payload(result: PetroResult, *, overview_max: int = 3000) -> dict
             "mean_phi_eff": round(float(result.mean_phi_eff), 4),
             "mean_Sw": round(float(result.mean_Sw), 4),
             "pef_distribution": result.pef_distribution,
+            "rho_ma_auto": bool(result.rho_ma_auto),
+            "Rw_auto": bool(result.Rw_auto),
+            "sp_used": bool(result.sp_used),
+            "sp_shale_baseline": (
+                round(float(result.sp_shale_baseline), 2)
+                if result.sp_shale_baseline is not None
+                else None
+            ),
+            "sp_sand_line": (
+                round(float(result.sp_sand_line), 2)
+                if result.sp_sand_line is not None
+                else None
+            ),
+            "used_phi_input": bool(result.used_phi_input),
+            "used_sw_input": bool(result.used_sw_input),
         },
-        "raw_arrays": {
-            "depth": _arr_to_list(result.depth, decimals=3),
-            "GR": _arr_to_list(result.GR, decimals=3),
-            "NPHI": _arr_to_list(result.NPHI, decimals=4),
-            "RHOZ": _arr_to_list(result.RHOZ, decimals=4),
-            "RT": _arr_to_list(result.RT, decimals=3),
-            "PEF": _arr_to_list(result.PEF, decimals=3),
-        },
+        "raw_arrays": _persist_raw_arrays(
+            result, persist_las_df=persist_las_df, curve_map=curve_map
+        ),
     }
 
 
@@ -351,7 +431,9 @@ async def upload_well(
             detail=f"Analysis failed: {exc}",
         )
 
-    log_payload = _build_log_payload(result)
+    log_payload = _build_log_payload(
+        result, persist_las_df=las_data.df, curve_map=curve_map
+    )
     log_payload["curve_map"] = curve_map
     log_payload["validation"] = {
         k: v for k, v in validation.items() if k not in ("missing_critical",)
@@ -367,7 +449,10 @@ async def upload_well(
         depth_start=las_data.meta.depth_start,
         depth_stop=las_data.meta.depth_stop,
         curves_available=curves_available,
-        petro_params=params.to_dict(),
+        # Store the *resolved* params (auto-estimated values filled in) so the
+        # UI and the AI interpreter both see the numbers that were actually
+        # applied to this well.
+        petro_params=result.params_used.to_dict(),
         result_json=log_payload,
         ai_interpretation=ai,
     )
@@ -520,6 +605,7 @@ async def export_well(
     cols = [
         "DEPTH",
         "GR",
+        "SP",
         "NPHI",
         "DPHI",
         "RHOZ",
@@ -578,36 +664,26 @@ async def reanalyze_well(
             detail="Original log data is not stored. Please re-upload the LAS file.",
         )
 
-    # Reconstitute a DataFrame from raw arrays
-    import pandas as pd
-
-    def _arr(name: str) -> np.ndarray:
-        vals = raw.get(name) or []
-        return np.array([np.nan if v is None else v for v in vals], dtype=np.float64)
-
-    df = pd.DataFrame(
-        {
-            "DEPT": _arr("depth"),
-            "GR": _arr("GR"),
-            "NPHI": _arr("NPHI"),
-            "RHOZ": _arr("RHOZ"),
-            "RT": _arr("RT"),
-            "PEF": _arr("PEF"),
-        }
-    )
-    curve_map = {
+    cm_json = rj.get("curve_map")
+    df = _dataframe_from_stored_raw(raw, cm_json if cm_json else None)
+    curve_map: dict = dict(cm_json) if cm_json else {
         "GR": "GR",
         "NPHI": "NPHI",
         "RHOZ": "RHOZ",
         "RT": "RT",
         "PEF": "PEF",
     }
+    if "SP" in df.columns and "SP" not in curve_map:
+        curve_map["SP"] = "SP"
 
     stored = well.petro_params or {}
     base = PetroParams(**{k: stored[k] for k in stored if k in PetroParams.__dataclass_fields__})
 
-    # Merge: new values override stored values
-    update = payload.model_dump(exclude_none=True)
+    # Merge: only fields the user explicitly sent are carried over. Sending
+    # ``rho_ma=null`` or ``Rw=null`` therefore *clears* the stored value and
+    # triggers re-auto-estimation; sliders that always submit a number keep
+    # working unchanged.
+    update = payload.model_dump(exclude_unset=True)
     for k, v in update.items():
         setattr(base, k, v)
 
@@ -628,10 +704,15 @@ async def reanalyze_well(
             detail=f"Reanalysis failed: {exc}",
         )
 
-    log_payload = _build_log_payload(result)
+    log_payload = _build_log_payload(
+        result, persist_las_df=df, curve_map=curve_map
+    )
     log_payload["curve_map"] = curve_map
 
-    well.petro_params = base.to_dict()
+    # Persist the resolved parameter set so subsequent re-analyses can start
+    # from the same numbers — re-auto only happens when the caller explicitly
+    # clears rho_ma/Rw via a null payload value (see exclude_unset above).
+    well.petro_params = result.params_used.to_dict()
     well.result_json = log_payload
     well.ai_interpretation = ai
 

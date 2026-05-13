@@ -34,11 +34,19 @@ import pandas as pd
 
 @dataclass
 class PetroParams:
-    """All user-tunable petrophysical parameters."""
+    """All user-tunable petrophysical parameters.
 
-    rho_ma: float = 2.71            # limestone default (g/cc)
+    ``rho_ma`` and ``Rw`` default to None which means "estimate from the logs".
+    The matrix density is recovered from RHOZ + NPHI in clean intervals; the
+    water resistivity is recovered from the minimum apparent water resistivity
+    (Rwa) in clean, porous, presumed-wet intervals. The resolved values are
+    written back into ``params_used`` on the result so the UI and the AI
+    interpreter can see what was actually applied.
+    """
+
+    rho_ma: Optional[float] = None  # g/cc; None → auto-estimate
     rho_fl: float = 1.00            # fluid density (g/cc)
-    Rw: float = 1.0                 # formation water resistivity (ohm.m)
+    Rw: Optional[float] = None      # ohm.m; None → auto-estimate (Rwa method)
     a: float = 1.0                  # Archie tortuosity factor
     m: float = 2.0                  # Archie cementation exponent
     n: float = 2.0                  # Archie saturation exponent
@@ -64,6 +72,7 @@ class PetroResult:
     RHOZ: np.ndarray
     RT: np.ndarray
     PEF: np.ndarray
+    SP: np.ndarray
     Vsh: np.ndarray
     phi_eff: np.ndarray
     Sw: np.ndarray
@@ -71,6 +80,7 @@ class PetroResult:
     BVW: np.ndarray
     hc_type: np.ndarray              # int8 0/1/2
     lith_flag: np.ndarray            # int8 0/1/2/3
+    permeable_sp: np.ndarray         # bool; True where SP indicates permeable rock
 
     # Scalars
     GR_clean: float = 0.0
@@ -81,6 +91,15 @@ class PetroResult:
     mean_phi_eff: float = 0.0
     mean_Sw: float = 0.0
     pef_distribution: dict = field(default_factory=dict)
+
+    # Auto-estimation diagnostics (helpful for UI + AI explanation)
+    rho_ma_auto: bool = False
+    Rw_auto: bool = False
+    sp_shale_baseline: Optional[float] = None
+    sp_sand_line: Optional[float] = None
+    sp_used: bool = False
+    used_phi_input: bool = False
+    used_sw_input: bool = False
 
     zones: list[dict] = field(default_factory=list)
     params_used: PetroParams = field(default_factory=PetroParams)
@@ -120,6 +139,137 @@ def _nanpercentile_safe(arr: np.ndarray, q: float, default: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Auto-estimation helpers
+# ---------------------------------------------------------------------------
+
+
+def _auto_rho_ma(
+    RHOZ: np.ndarray, NPHI: np.ndarray, Vsh: np.ndarray, rho_fl: float
+) -> float:
+    """Recover the matrix density from RHOZ + NPHI in clean intervals.
+
+    Standard apparent matrix density relation:
+
+        rho_ma_app = (rho_b - phi * rho_fl) / (1 - phi)
+
+    Restrict the population to clean, non-pathological samples (low Vsh,
+    sensible neutron porosity range) and take the median. Falls back to a
+    sensible limestone value (2.71) when there's not enough good data.
+    """
+    if (
+        RHOZ.size == 0
+        or not np.any(np.isfinite(RHOZ))
+        or not np.any(np.isfinite(NPHI))
+    ):
+        return 2.71
+
+    finite_vsh = np.where(np.isfinite(Vsh), Vsh, 1.0)
+    mask = (
+        np.isfinite(RHOZ)
+        & np.isfinite(NPHI)
+        & (finite_vsh < 0.20)
+        & (NPHI > 0.02)
+        & (NPHI < 0.30)
+        & (RHOZ > 2.20)  # exclude obvious gas effect / cave-ins
+    )
+    if int(mask.sum()) < 50:
+        return 2.71
+
+    phi = NPHI[mask]
+    rho_b = RHOZ[mask]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rho_ma_app = (rho_b - phi * rho_fl) / (1.0 - phi)
+    rho_ma_app = rho_ma_app[np.isfinite(rho_ma_app)]
+    if rho_ma_app.size < 50:
+        return 2.71
+
+    val = float(np.median(rho_ma_app))
+    return max(2.55, min(3.00, val))
+
+
+def _auto_rw(
+    RT: np.ndarray,
+    phi_eff: np.ndarray,
+    Vsh: np.ndarray,
+    a: float,
+    m: float,
+) -> float:
+    """Recover Rw from the minimum apparent water resistivity in clean rock.
+
+    In any sample, ``Rwa = Rt * phi^m / a``. In a water-bearing zone
+    (Sw = 1) Rwa equals Rw; in hydrocarbon zones Rwa is much higher.
+    Taking the p10 of Rwa over clean, porous, finite samples therefore
+    yields a robust estimate of Rw that does not depend on the user.
+    """
+    finite_vsh = np.where(np.isfinite(Vsh), Vsh, 1.0)
+    mask = (
+        np.isfinite(RT)
+        & np.isfinite(phi_eff)
+        & (finite_vsh < 0.30)
+        & (phi_eff > 0.08)
+        & (RT > 0.1)
+        & (RT < 2000.0)
+    )
+    if int(mask.sum()) < 50:
+        return 0.10
+
+    with np.errstate(invalid="ignore"):
+        rwa = RT[mask] * np.power(phi_eff[mask], m) / max(a, 1e-6)
+    rwa = rwa[np.isfinite(rwa) & (rwa > 0)]
+    if rwa.size < 20:
+        return 0.10
+
+    val = float(np.percentile(rwa, 10))
+    return max(0.01, min(5.0, val))
+
+
+def _sp_permeable_mask(
+    SP: np.ndarray, Vsh: np.ndarray
+) -> tuple[np.ndarray, Optional[float], Optional[float], bool]:
+    """Derive a permeability flag from the SP curve.
+
+    Returns ``(permeable_mask, shale_baseline, sand_line, used)``.
+
+    The standard "two-line" interpretation is used: the shale baseline is the
+    median SP in high-Vsh rock, the sand line is the p10 of SP in clean rock,
+    and a sample is considered permeable when its SP deflects at least 30 % of
+    SSP toward the sand line. If SP is missing or SSP is too small to be
+    meaningful, ``used`` is False and the returned mask is all True (i.e. the
+    SP filter is effectively disabled).
+    """
+    n = SP.size
+    if n == 0 or not np.any(np.isfinite(SP)):
+        return np.ones(n, dtype=bool), None, None, False
+
+    finite_vsh = np.where(np.isfinite(Vsh), Vsh, 0.5)
+    shale_mask = np.isfinite(SP) & (finite_vsh > 0.55)
+    sand_mask = np.isfinite(SP) & (finite_vsh < 0.25)
+    if int(shale_mask.sum()) < 25 or int(sand_mask.sum()) < 25:
+        return np.ones(n, dtype=bool), None, None, False
+
+    shale_baseline = float(np.median(SP[shale_mask]))
+    # sand_line is the SP value most "deflected" relative to shale. SP can be
+    # negative or positive polarity depending on the borehole / mud system, so
+    # we pick the percentile that is furthest from the baseline.
+    sand_low = float(np.percentile(SP[sand_mask], 10))
+    sand_high = float(np.percentile(SP[sand_mask], 90))
+    if abs(sand_low - shale_baseline) >= abs(sand_high - shale_baseline):
+        sand_line = sand_low
+    else:
+        sand_line = sand_high
+
+    ssp = sand_line - shale_baseline  # signed: negative for normal polarity
+    if abs(ssp) < 8.0:  # mV — too small to be a reliable indicator
+        return np.ones(n, dtype=bool), shale_baseline, sand_line, False
+
+    # delta toward sand line, normalised
+    with np.errstate(invalid="ignore"):
+        deflection = (SP - shale_baseline) / ssp  # 0=shale, 1=sand
+    permeable = np.where(np.isfinite(deflection), deflection >= 0.30, False)
+    return permeable, shale_baseline, sand_line, True
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -140,6 +290,7 @@ def run_petrophysics(
     RHOZ = _extract(df, curve_map, "RHOZ", n)
     RT = _extract(df, curve_map, "RT", n)
     PEF = _extract(df, curve_map, "PEF", n)
+    SP = _extract(df, curve_map, "SP", n)
 
     with np.errstate(invalid="ignore"):
         # Out-of-range values → NaN, not clipped to bounds (keeps interpretability)
@@ -148,20 +299,11 @@ def run_petrophysics(
         RHOZ[(RHOZ < 1.0) | (RHOZ > 3.5)] = np.nan
         RT[(RT < 0.01) | (RT > 10000)] = np.nan
         PEF[(PEF < 0) | (PEF > 20)] = np.nan
+        SP[(SP < -500) | (SP > 500)] = np.nan  # millivolts; absurd values → NaN
 
-    # ----- STEP 2: density porosity
-    rho_ma = params.rho_ma
     rho_fl = params.rho_fl
-    denom = rho_ma - rho_fl
-    if denom == 0:
-        DPHI = np.full(n, np.nan, dtype=np.float64)
-    else:
-        with np.errstate(invalid="ignore"):
-            DPHI = (rho_ma - RHOZ) / denom
-        DPHI = np.where(np.isfinite(RHOZ), DPHI, np.nan)
-    DPHI = np.clip(DPHI, -0.20, 0.65)
 
-    # ----- STEP 3: Vsh from gamma ray (linear Larionov)
+    # ----- STEP 3 (pre-pass): Vsh — needed before rho_ma auto-estimation
     GR_clean = (
         params.GR_clean
         if params.GR_clean is not None
@@ -173,11 +315,26 @@ def run_petrophysics(
         else _nanpercentile_safe(GR, 90, 120.0)
     )
     if GR_shale - GR_clean < 1.0:
-        # Pathological well — avoid divide-by-zero
         GR_shale = GR_clean + 1.0
     Vsh = (GR - GR_clean) / (GR_shale - GR_clean)
     Vsh = np.where(np.isfinite(GR), Vsh, np.nan)
     Vsh = np.clip(Vsh, 0.0, 1.0)
+
+    # ----- STEP 2: density porosity (with auto-estimated rho_ma if needed)
+    rho_ma_auto = params.rho_ma is None
+    if rho_ma_auto:
+        rho_ma = _auto_rho_ma(RHOZ, NPHI, Vsh, rho_fl)
+    else:
+        rho_ma = float(params.rho_ma)
+
+    denom = rho_ma - rho_fl
+    if denom == 0:
+        DPHI = np.full(n, np.nan, dtype=np.float64)
+    else:
+        with np.errstate(invalid="ignore"):
+            DPHI = (rho_ma - RHOZ) / denom
+        DPHI = np.where(np.isfinite(RHOZ), DPHI, np.nan)
+    DPHI = np.clip(DPHI, -0.20, 0.65)
 
     # ----- STEP 4: effective porosity (neutron-density average)
     has_nphi = np.isfinite(NPHI)
@@ -193,39 +350,93 @@ def run_petrophysics(
     phi_eff = np.where(np.isfinite(phi_nd), phi_eff, np.nan)
     phi_eff = np.clip(phi_eff, 0.001, 0.50)
 
-    # ----- STEP 5: Archie Sw
+    used_phi_input = False
+    used_sw_input = False
+
+    # Optional vendor / ELAN effective porosity (PIGN, PHIT, …) overrides ND-MIN model.
+    phi_vendor = _extract(df, curve_map, "PHI_INPUT", n)
+    if np.any(np.isfinite(phi_vendor)):
+        phi_vendor = np.where(
+            np.isfinite(phi_vendor) & (phi_vendor >= -0.05) & (phi_vendor <= 0.65),
+            phi_vendor,
+            np.nan,
+        )
+        mask_pv = np.isfinite(phi_vendor)
+        if np.any(mask_pv):
+            phi_eff = np.where(mask_pv, np.clip(phi_vendor, 0.001, 0.50), phi_eff)
+            used_phi_input = True
+
+    # ----- STEP 5: Archie water saturation (with auto-estimated Rw if needed)
+    Rw_auto = params.Rw is None
+    if Rw_auto:
+        Rw = _auto_rw(RT, phi_eff, Vsh, params.a, params.m)
+    else:
+        Rw = float(params.Rw)
+
     with np.errstate(divide="ignore", invalid="ignore"):
-        Sw = np.power(
-            (params.a * params.Rw) / (np.power(phi_eff, params.m) * RT),
+        Sw_arch = np.power(
+            (params.a * Rw) / (np.power(phi_eff, params.m) * RT),
             1.0 / params.n,
         )
-    Sw = np.where(np.isfinite(RT) & np.isfinite(phi_eff), Sw, np.nan)
+    Sw_arch = np.where(np.isfinite(RT) & np.isfinite(phi_eff), Sw_arch, np.nan)
+    Sw_arch = np.clip(Sw_arch, 0.0, 1.0)
+
+    sw_log = _extract(df, curve_map, "SW_INPUT", n)
+    if np.any(np.isfinite(sw_log)):
+        sl = sw_log[np.isfinite(sw_log)]
+        if sl.size and float(np.nanmedian(sl)) > 1.5:
+            with np.errstate(invalid="ignore"):
+                sw_log = np.where(np.isfinite(sw_log), sw_log / 100.0, sw_log)
+        sw_log = np.where((sw_log >= 0) & (sw_log <= 1.5), sw_log, np.nan)
+        sw_log = np.clip(sw_log, 0.0, 1.0)
+
+    if np.any(np.isfinite(sw_log)):
+        Sw = np.where(np.isfinite(sw_log), sw_log, Sw_arch)
+        used_sw_input = True
+    else:
+        Sw = Sw_arch
     Sw = np.clip(Sw, 0.0, 1.0)
     Shc = 1.0 - Sw
     BVW = phi_eff * Sw
 
-    # ----- STEP 6: gas crossover
+    # ----- STEP 6: gas crossover (NPHI–DPHI) + optional RST / ELAN gas curves (VXGA, SXGA)
     gas_crossover = np.zeros(n, dtype=bool)
     both = np.isfinite(DPHI) & np.isfinite(NPHI)
     gas_crossover[both] = (DPHI[both] - NPHI[both]) > 0.03
+    gflag = _extract(df, curve_map, "GAS_FLAG", n)
+    if np.any(np.isfinite(gflag)):
+        gas_crossover = gas_crossover | (np.isfinite(gflag) & (gflag > 0.02))
+
+    # ----- STEP 6b: SP-derived permeability flag
+    permeable_sp, sp_baseline, sp_sand_line, sp_used = _sp_permeable_mask(SP, Vsh)
 
     # ----- STEP 7: data quality mask
+    # NOTE: we deliberately do NOT require both NPHI and RHOZ to be finite
+    # here. `phi_eff` already encodes "we have at least one porosity log"
+    # (it falls back to whichever of NPHI / DPHI is available). Requiring
+    # both individually would punch spurious gaps into HC zones whenever a
+    # single porosity sample is null (e.g. a -999 NPHI spike), even though
+    # the petrophysics at that depth is perfectly well-defined.
     valid_mask = (
-        np.isfinite(RT)
-        & np.isfinite(RHOZ)
-        & np.isfinite(NPHI)
-        & np.isfinite(GR)
+        np.isfinite(GR)
         & np.isfinite(phi_eff)
         & np.isfinite(Sw)
     )
 
     # ----- STEP 8: HC detection
+    finite_rt = np.isfinite(RT)
+    rt_pass = np.where(finite_rt, RT > params.Rt_cutoff, True)
+    # SP filter is applied softly: when SP is unavailable / inconclusive the
+    # mask is all-True so it has no effect; otherwise samples that the SP
+    # interprets as impermeable shale are excluded even when the saturation
+    # equation alone would have qualified them.
     hc_mask = (
         valid_mask
         & (Vsh < params.Vsh_cutoff)
         & (phi_eff > params.phi_cutoff)
-        & (RT > params.Rt_cutoff)
+        & rt_pass
         & (Shc > params.Shc_cutoff)
+        & permeable_sp
     )
     gas_mask = hc_mask & gas_crossover
     oil_mask = hc_mask & ~gas_crossover
@@ -298,6 +509,23 @@ def run_petrophysics(
         "uncertain_pct": 100.0 * float(np.sum(lith_flag == 3)) / total_lith,
     }
 
+    # Resolved params actually applied (auto-estimates filled in if needed)
+    resolved_params = PetroParams(
+        rho_ma=rho_ma,
+        rho_fl=rho_fl,
+        Rw=Rw,
+        a=params.a,
+        m=params.m,
+        n=params.n,
+        GR_clean=GR_clean,
+        GR_shale=GR_shale,
+        Rt_cutoff=params.Rt_cutoff,
+        Shc_cutoff=params.Shc_cutoff,
+        phi_cutoff=params.phi_cutoff,
+        Vsh_cutoff=params.Vsh_cutoff,
+        Sw_producible=params.Sw_producible,
+    )
+
     return PetroResult(
         depth=depth,
         GR=GR,
@@ -306,6 +534,7 @@ def run_petrophysics(
         RHOZ=RHOZ,
         RT=RT,
         PEF=PEF,
+        SP=SP,
         Vsh=Vsh,
         phi_eff=phi_eff,
         Sw=Sw,
@@ -313,6 +542,7 @@ def run_petrophysics(
         BVW=BVW,
         hc_type=hc_type,
         lith_flag=lith_flag,
+        permeable_sp=permeable_sp,
         GR_clean=GR_clean,
         GR_shale=GR_shale,
         mean_GR=mean_GR,
@@ -321,8 +551,15 @@ def run_petrophysics(
         mean_phi_eff=mean_phi_eff,
         mean_Sw=mean_Sw,
         pef_distribution=pef_distribution,
+        rho_ma_auto=rho_ma_auto,
+        Rw_auto=Rw_auto,
+        sp_shale_baseline=sp_baseline,
+        sp_sand_line=sp_sand_line,
+        sp_used=sp_used,
+        used_phi_input=used_phi_input,
+        used_sw_input=used_sw_input,
         zones=all_zones,
-        params_used=params,
+        params_used=resolved_params,
     )
 
 

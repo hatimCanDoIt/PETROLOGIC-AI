@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import Sidebar from '@/components/layout/Sidebar'
 import TopBar from '@/components/layout/TopBar'
@@ -9,6 +9,7 @@ import Card from '@/components/ui/Card'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/hooks/useAuth'
 import { useDeleteWell, useWellStats, useWells } from '@/hooks/useWell'
+import DashboardSettings from '@/pages/DashboardSettings'
 import type { WellSummary } from '@/types'
 
 function StatCard({
@@ -117,13 +118,20 @@ export default function Dashboard() {
   const wells = useWells()
   const stats = useWellStats()
   const del = useDeleteWell()
+  const [params] = useSearchParams()
+  const tab = params.get('tab') || 'overview'
+  const wellsAnchorRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    // Refresh user record on first mount (e.g. after OAuth login)
     if (user && !user.email) {
       fetchMe().catch(() => undefined)
     }
   }, [user, fetchMe])
+
+  useEffect(() => {
+    if (tab !== 'wells') return
+    wellsAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [tab])
 
   return (
     <div className="flex h-screen">
@@ -135,6 +143,10 @@ export default function Dashboard() {
         />
 
         <div className="px-6 py-6 space-y-6">
+          {tab === 'settings' ? (
+            <DashboardSettings />
+          ) : (
+            <>
           {/* Stat row */}
           <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard
@@ -171,6 +183,7 @@ export default function Dashboard() {
           <UploadZone />
 
           {/* Recent wells */}
+          <div ref={wellsAnchorRef} id="recent-wells">
           <Card title="Recent Wells" subtitle="Click a well to open its report">
             {wells.isLoading ? (
               <div className="flex items-center gap-2 py-8 text-text-dim">
@@ -182,13 +195,13 @@ export default function Dashboard() {
               <div className="py-12 text-center">
                 <svg
                   viewBox="0 0 64 64"
-                  className="mx-auto h-16 w-16 text-text-dim/60"
+                  className="mx-auto h-16 w-16 text-accent"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.5"
                 >
                   <path d="M8 8v48M20 8v48M32 8v48M44 8v48M56 8v48" />
-                  <path d="M14 16 Q18 22 14 28 Q10 34 14 40 L14 50" stroke="#00d4ff" />
+                  <path d="M14 16 Q18 22 14 28 Q10 34 14 40 L14 50" />
                 </svg>
                 <p className="mt-4 text-text-dim">No wells yet.</p>
                 <p className="text-sm text-accent mt-1">Upload your first LAS file above.</p>
@@ -235,6 +248,9 @@ export default function Dashboard() {
               </div>
             )}
           </Card>
+          </div>
+            </>
+          )}
         </div>
       </main>
     </div>

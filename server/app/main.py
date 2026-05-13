@@ -10,6 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import settings
 from .routers import auth as auth_router
+from .routers import billing as billing_router
 from .routers import wells as wells_router
 
 logging.basicConfig(
@@ -39,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router)
+app.include_router(billing_router.router)
 app.include_router(wells_router.router)
 
 

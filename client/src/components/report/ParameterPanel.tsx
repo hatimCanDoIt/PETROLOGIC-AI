@@ -8,6 +8,9 @@ interface ParameterPanelProps {
   current: Partial<PetroParams>
   onSubmit: (params: Partial<PetroParams>) => void | Promise<void>
   loading?: boolean
+  // Diagnostics from the result so we can show what auto-estimation used
+  rhoMaAuto?: boolean
+  rwAuto?: boolean
 }
 
 interface SliderProps {
@@ -45,7 +48,7 @@ function Slider({ label, value, onChange, min, max, step = 0.01, format, unit, l
         className="w-full accent-accent"
       />
       {logDisplay && (
-        <p className="font-mono text-[9px] text-text-dim/70">
+        <p className="font-mono text-[9px] text-text-faint">
           log scale display · linear control
         </p>
       )}
@@ -54,9 +57,9 @@ function Slider({ label, value, onChange, min, max, step = 0.01, format, unit, l
 }
 
 const DEFAULTS: PetroParams = {
-  rho_ma: 2.71,
+  rho_ma: null,
   rho_fl: 1.0,
-  Rw: 1.0,
+  Rw: null,
   a: 1.0,
   m: 2.0,
   n: 2.0,
@@ -69,68 +72,203 @@ const DEFAULTS: PetroParams = {
   Sw_producible: 0.60,
 }
 
-export default function ParameterPanel({ current, onSubmit, loading }: ParameterPanelProps) {
-  const merge: PetroParams = { ...DEFAULTS, ...current } as PetroParams
-  const [p, setP] = useState<PetroParams>(merge)
+// Local form state — separate the "auto" override from the numeric value so
+// the user can type a number, clear it, or revert to auto without ambiguity.
+interface FormState {
+  rho_ma_auto: boolean
+  rho_ma_input: string
+  Rw_auto: boolean
+  Rw_input: string
+  a: number
+  m: number
+  n: number
+  Rt_cutoff: number
+  Shc_cutoff: number
+  GR_clean: string
+  GR_shale: string
+}
 
-  const set = (k: keyof PetroParams, v: number | null) =>
-    setP((prev) => ({ ...prev, [k]: v }))
+function num(s: string): number | null {
+  if (s === '' || s == null) return null
+  const v = parseFloat(s)
+  return Number.isFinite(v) ? v : null
+}
+
+interface AutoFieldProps {
+  label: string
+  unit?: string
+  auto: boolean
+  value: string
+  resolvedValue?: number | null
+  onAutoChange: (auto: boolean) => void
+  onValueChange: (v: string) => void
+  step?: string
+  min?: string
+  max?: string
+  placeholder?: string
+}
+
+function AutoField({
+  label,
+  unit,
+  auto,
+  value,
+  resolvedValue,
+  onAutoChange,
+  onValueChange,
+  step,
+  min,
+  max,
+  placeholder,
+}: AutoFieldProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <label className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+          {label}
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => onAutoChange(e.target.checked)}
+            className="accent-accent"
+          />
+          <span className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+            auto
+          </span>
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          value={auto ? '' : value}
+          onChange={(e) => onValueChange(e.target.value)}
+          step={step}
+          min={min}
+          max={max}
+          placeholder={placeholder ?? 'auto'}
+          disabled={auto}
+          className="flex-1 bg-bg-deep border border-border rounded px-2 py-1.5 font-mono text-xs text-text-bright disabled:text-text-softer disabled:cursor-not-allowed focus:outline-none focus:border-accent"
+        />
+        {unit && (
+          <span className="font-mono text-[10px] text-text-dim shrink-0">{unit}</span>
+        )}
+      </div>
+      {auto && resolvedValue != null && Number.isFinite(resolvedValue) && (
+        <p className="font-mono text-[9px] text-accent/80">
+          auto-estimated: {resolvedValue.toFixed(3)}
+          {unit ? ` ${unit}` : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export default function ParameterPanel({
+  current,
+  onSubmit,
+  loading,
+  rhoMaAuto,
+  rwAuto,
+}: ParameterPanelProps) {
+  const merged: PetroParams = { ...DEFAULTS, ...current } as PetroParams
+
+  const [form, setForm] = useState<FormState>(() => ({
+    rho_ma_auto: rhoMaAuto ?? merged.rho_ma == null,
+    rho_ma_input:
+      merged.rho_ma != null ? merged.rho_ma.toFixed(3) : '',
+    Rw_auto: rwAuto ?? merged.Rw == null,
+    Rw_input: merged.Rw != null ? merged.Rw.toFixed(3) : '',
+    a: merged.a,
+    m: merged.m,
+    n: merged.n,
+    Rt_cutoff: merged.Rt_cutoff,
+    Shc_cutoff: merged.Shc_cutoff,
+    GR_clean: merged.GR_clean != null ? String(merged.GR_clean) : '',
+    GR_shale: merged.GR_shale != null ? String(merged.GR_shale) : '',
+  }))
+
+  const setForm_ = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+    setForm((prev) => ({ ...prev, [k]: v }))
+
+  const handleSubmit = () => {
+    const payload: Partial<PetroParams> = {
+      // null explicitly clears the stored value → re-trigger auto on the server
+      rho_ma: form.rho_ma_auto ? null : num(form.rho_ma_input),
+      Rw: form.Rw_auto ? null : num(form.Rw_input),
+      a: form.a,
+      m: form.m,
+      n: form.n,
+      Rt_cutoff: form.Rt_cutoff,
+      Shc_cutoff: form.Shc_cutoff,
+      GR_clean: num(form.GR_clean),
+      GR_shale: num(form.GR_shale),
+    }
+    onSubmit(payload)
+  }
 
   return (
     <div className="space-y-5">
       <p className="text-xs text-text-dim">
-        Adjust petrophysical parameters and re-run. The deterministic engine and
-        AI interpretation will both refresh.
+        Matrix density and Rw are estimated directly from the logs unless you
+        provide an override. Re-running refreshes both the deterministic
+        engine and the AI interpretation.
       </p>
 
       <div className="space-y-4">
-        <Slider
+        <AutoField
           label="Matrix density (ρₘₐ)"
-          value={p.rho_ma}
-          onChange={(v) => set('rho_ma', v)}
-          min={1.8}
-          max={3.2}
-          step={0.01}
           unit="g/cc"
+          auto={form.rho_ma_auto}
+          value={form.rho_ma_input}
+          resolvedValue={merged.rho_ma}
+          onAutoChange={(v) => setForm_('rho_ma_auto', v)}
+          onValueChange={(v) => setForm_('rho_ma_input', v)}
+          step="0.01"
+          min="1.8"
+          max="3.2"
         />
-        <Slider
+        <AutoField
           label="Formation water Rw"
-          value={p.Rw}
-          onChange={(v) => set('Rw', v)}
-          min={0.01}
-          max={10}
-          step={0.01}
           unit="Ω·m"
-          logDisplay
+          auto={form.Rw_auto}
+          value={form.Rw_input}
+          resolvedValue={merged.Rw}
+          onAutoChange={(v) => setForm_('Rw_auto', v)}
+          onValueChange={(v) => setForm_('Rw_input', v)}
+          step="0.001"
+          min="0.01"
+          max="10"
         />
         <Slider
           label="Archie a"
-          value={p.a}
-          onChange={(v) => set('a', v)}
+          value={form.a}
+          onChange={(v) => setForm_('a', v)}
           min={0.5}
           max={2.0}
           step={0.05}
         />
         <Slider
           label="Archie m"
-          value={p.m}
-          onChange={(v) => set('m', v)}
+          value={form.m}
+          onChange={(v) => setForm_('m', v)}
           min={1.5}
           max={3.0}
           step={0.05}
         />
         <Slider
           label="Archie n"
-          value={p.n}
-          onChange={(v) => set('n', v)}
+          value={form.n}
+          onChange={(v) => setForm_('n', v)}
           min={1.5}
           max={3.0}
           step={0.05}
         />
         <Slider
           label="Rt cutoff"
-          value={p.Rt_cutoff}
-          onChange={(v) => set('Rt_cutoff', v)}
+          value={form.Rt_cutoff}
+          onChange={(v) => setForm_('Rt_cutoff', v)}
           min={1}
           max={100}
           step={1}
@@ -139,8 +277,8 @@ export default function ParameterPanel({ current, onSubmit, loading }: Parameter
         />
         <Slider
           label="Shc cutoff"
-          value={p.Shc_cutoff * 100}
-          onChange={(v) => set('Shc_cutoff', v / 100)}
+          value={form.Shc_cutoff * 100}
+          onChange={(v) => setForm_('Shc_cutoff', v / 100)}
           min={10}
           max={70}
           step={5}
@@ -152,26 +290,21 @@ export default function ParameterPanel({ current, onSubmit, loading }: Parameter
           <Input
             label="GR Clean (auto if blank)"
             type="number"
-            value={p.GR_clean ?? ''}
-            onChange={(e) => set('GR_clean', e.target.value === '' ? null : parseFloat(e.target.value))}
+            value={form.GR_clean}
+            onChange={(e) => setForm_('GR_clean', e.target.value)}
             placeholder="auto"
           />
           <Input
             label="GR Shale (auto if blank)"
             type="number"
-            value={p.GR_shale ?? ''}
-            onChange={(e) => set('GR_shale', e.target.value === '' ? null : parseFloat(e.target.value))}
+            value={form.GR_shale}
+            onChange={(e) => setForm_('GR_shale', e.target.value)}
             placeholder="auto"
           />
         </div>
       </div>
 
-      <Button
-        size="lg"
-        className="w-full"
-        loading={loading}
-        onClick={() => onSubmit(p)}
-      >
+      <Button size="lg" className="w-full" loading={loading} onClick={handleSubmit}>
         Re-analyze
       </Button>
     </div>

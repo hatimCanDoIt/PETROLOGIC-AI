@@ -28,6 +28,14 @@ class User(Base):
     google_id: Mapped[Optional[str]] = mapped_column(
         String, nullable=True, unique=True, index=True
     )
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True, index=True
+    )
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True
+    )
+    billing_plan: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    billing_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )

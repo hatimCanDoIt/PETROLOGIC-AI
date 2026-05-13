@@ -1,11 +1,14 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 
 import { useAuth } from '@/hooks/useAuth'
 import Logo from './Logo'
 
+type DashboardTab = 'overview' | 'wells' | 'settings'
+
 interface NavItem {
   to: string
+  tab: DashboardTab
   label: string
   icon: JSX.Element
 }
@@ -14,6 +17,7 @@ const ICON_CLASS = 'h-4 w-4 shrink-0'
 
 const NAV: NavItem[] = [
   {
+    tab: 'overview',
     to: '/dashboard',
     label: 'Dashboard',
     icon: (
@@ -26,6 +30,7 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    tab: 'wells',
     to: '/dashboard?tab=wells',
     label: 'My Wells',
     icon: (
@@ -35,6 +40,7 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    tab: 'settings',
     to: '/dashboard?tab=settings',
     label: 'Settings',
     icon: (
@@ -46,22 +52,65 @@ const NAV: NavItem[] = [
   },
 ]
 
+const ACCOUNT_NAV: { to: string; label: string; icon: JSX.Element }[] = [
+  {
+    to: '/subscription',
+    label: 'Plans',
+    icon: (
+      <svg viewBox="0 0 24 24" className={ICON_CLASS} fill="none" stroke="currentColor" strokeWidth="1.6">
+        <path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+      </svg>
+    ),
+  },
+  {
+    to: '/billing',
+    label: 'Billing',
+    icon: (
+      <svg viewBox="0 0 24 24" className={ICON_CLASS} fill="none" stroke="currentColor" strokeWidth="1.6">
+        <rect x="2" y="5" width="20" height="14" rx="2" />
+        <path d="M2 10h20" />
+      </svg>
+    ),
+  },
+]
+
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const location = useLocation()
+  const [params] = useSearchParams()
+  const dashTabRaw = params.get('tab')
+  const dashTab: DashboardTab =
+    dashTabRaw === 'wells' || dashTabRaw === 'settings' ? dashTabRaw : 'overview'
 
   return (
-    <aside className="hidden md:flex w-[240px] shrink-0 flex-col border-r border-border bg-bg-panel/60">
+    <aside className="hidden md:flex w-[240px] shrink-0 flex-col border-r border-border surface-sidebar">
       <div className="px-5 py-6">
         <Logo size={28} />
       </div>
 
       <nav className="px-3 flex-1 flex flex-col gap-1">
         {NAV.map((item) => {
-          const [path, query] = item.to.split('?')
-          const active =
-            location.pathname === path &&
-            (!query || location.search.includes(query.split('=')[1] ?? ''))
+          const active = location.pathname === '/dashboard' && dashTab === item.tab
+          return (
+            <NavLink
+              key={item.tab}
+              to={item.to}
+              className={clsx(
+                'flex items-center gap-3 px-3 py-2 rounded-md font-mono text-xs uppercase tracking-widest transition-colors',
+                active
+                  ? 'bg-accent/10 text-accent'
+                  : 'text-text-dim hover:text-text hover:bg-bg-deep',
+              )}
+            >
+              {item.icon}
+              {item.label}
+            </NavLink>
+          )
+        })}
+
+        <div className="my-2 border-t border-border pt-2" />
+        {ACCOUNT_NAV.map((item) => {
+          const active = location.pathname === item.to
           return (
             <NavLink
               key={item.to}

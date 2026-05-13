@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 
-import { COLORS, PX_PER_FT } from '@/utils/colors'
+import { PX_PER_FT } from '@/utils/colors'
+import { useChartPalette } from '@/theme/ThemeProvider'
 
 export interface CurveConfig {
   depths: number[]
@@ -46,7 +47,17 @@ export interface TrackCanvasProps {
   leftColorBar?: { depths: number[]; values: number[]; colors: string[] }
   scaleTicks?: number[]
   logScaleHeader?: boolean
+  scrollTop: number
+  viewportHeight: number
 }
+
+// Browsers cap each canvas at ~32 767 px (Chrome, Edge) or 16 384 px (Safari).
+// To stay safe at any zoom level we virtualize: only the currently visible
+// slice (+ a buffer in both directions, snapped to chunks so we don't have to
+// re-render on every single scroll pixel) is drawn.
+const VIRT_BUFFER = 1500
+const VIRT_CHUNK = 500
+const MAX_CANVAS_PX = 14000
 
 // ---------- coordinate helpers ----------
 
@@ -90,21 +101,31 @@ export default function TrackCanvas({
   leftColorBar,
   scaleTicks,
   logScaleHeader,
+  scrollTop,
+  viewportHeight,
 }: TrackCanvasProps) {
+  const palette = useChartPalette()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const tooltipState = useRef<{ visible: boolean }>({ visible: false })
 
   const totalHeight = useMemo(
     () => Math.max(1, (depthMax - depthMin) * PX_PER_FT * zoomFactor),
     [depthMax, depthMin, zoomFactor],
   )
 
-  // Build, for each curve, an index by depth (depth → array index) for the
-  // tooltip lookup. The curves are usually already depth-sorted.
-  const curveIndexes = useMemo(() => {
-    return curves.map((c) => c.depths.slice())
-  }, [curves])
+  // Virtualized canvas window — snap to chunks so we only re-render every
+  // ~500 scrolled px and never ask the GPU to allocate a > MAX_CANVAS_PX
+  // pixel-tall surface.
+  const { canvasTop, canvasH } = useMemo(() => {
+    if (totalHeight <= viewportHeight + 2 * VIRT_BUFFER) {
+      return { canvasTop: 0, canvasH: totalHeight }
+    }
+    const rawTop = Math.max(0, scrollTop - VIRT_BUFFER)
+    const snappedTop = Math.floor(rawTop / VIRT_CHUNK) * VIRT_CHUNK
+    const desiredH = viewportHeight + 2 * VIRT_BUFFER + VIRT_CHUNK
+    const h = Math.min(MAX_CANVAS_PX, Math.min(totalHeight - snappedTop, desiredH))
+    return { canvasTop: snappedTop, canvasH: Math.max(1, h) }
+  }, [totalHeight, scrollTop, viewportHeight])
 
   // ---------------------------------------------------------------- render
   useEffect(() => {
@@ -112,23 +133,33 @@ export default function TrackCanvas({
     if (!canvas) return
     const dpr = window.devicePixelRatio || 1
     canvas.width = width * dpr
-    canvas.height = totalHeight * dpr
+    canvas.height = canvasH * dpr
     canvas.style.width = `${width}px`
-    canvas.style.height = `${totalHeight}px`
+    canvas.style.height = `${canvasH}px`
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
+    const canvasBottom = canvasTop + canvasH
+    const ftToY = (ft: number) =>
+      ftToPx(ft, depthMin, zoomFactor) - canvasTop
+
+    // Depth range visible in this canvas slice
+    const sliceTopFt = depthMin + canvasTop / (PX_PER_FT * zoomFactor)
+    const sliceBotFt =
+      depthMin + canvasBottom / (PX_PER_FT * zoomFactor)
+
     // 1) background
-    ctx.fillStyle = COLORS.bg
-    ctx.fillRect(0, 0, width, totalHeight)
+    ctx.fillStyle = palette.bgPanel
+    ctx.fillRect(0, 0, width, canvasH)
 
     // 2) horizontal grid every 100ft
-    ctx.strokeStyle = 'rgba(22,40,64,0.5)'
+    ctx.strokeStyle = palette.trackGrid
     ctx.lineWidth = 0.5
-    const start = Math.ceil(depthMin / 100) * 100
-    for (let d = start; d <= depthMax; d += 100) {
-      const y = ftToPx(d, depthMin, zoomFactor)
+    const gridStart = Math.ceil(sliceTopFt / 100) * 100
+    const gridEnd = Math.min(depthMax, sliceBotFt)
+    for (let d = gridStart; d <= gridEnd; d += 100) {
+      const y = ftToY(d)
       ctx.beginPath()
       ctx.moveTo(0, y)
       ctx.lineTo(width, y)
@@ -137,12 +168,13 @@ export default function TrackCanvas({
 
     // 3) zone backgrounds + 4) top/bot lines + 5) depth labels
     for (const z of zones) {
-      const top = ftToPx(z.top_ft, depthMin, zoomFactor)
-      const bot = ftToPx(z.bot_ft, depthMin, zoomFactor)
-      ctx.fillStyle = z.zone_type === 'OIL' ? COLORS.zoneOilFill : COLORS.zoneGasFill
+      if (z.bot_ft < sliceTopFt - 2 || z.top_ft > sliceBotFt + 2) continue
+      const top = ftToY(z.top_ft)
+      const bot = ftToY(z.bot_ft)
+      ctx.fillStyle = z.zone_type === 'OIL' ? palette.zoneOilFill : palette.zoneGasFill
       ctx.fillRect(0, top, width, Math.max(1, bot - top))
 
-      const lineColor = z.zone_type === 'OIL' ? COLORS.zoneOilLine : COLORS.zoneGasLine
+      const lineColor = z.zone_type === 'OIL' ? palette.zoneOilLine : palette.zoneGasLine
       ctx.strokeStyle = lineColor
       ctx.lineWidth = 1.5
       ctx.setLineDash([4, 3])
@@ -155,7 +187,7 @@ export default function TrackCanvas({
       ctx.setLineDash([])
 
       ctx.fillStyle = lineColor
-      ctx.font = '9px "Orbitron", monospace'
+      ctx.font = '600 10px "IBM Plex Sans", system-ui, sans-serif'
       ctx.textAlign = 'left'
       ctx.textBaseline = 'bottom'
       ctx.fillText(`${z.top_ft.toFixed(0)} ft`, 4, top - 2)
@@ -169,22 +201,24 @@ export default function TrackCanvas({
       for (let i = 0; i < leftColorBar.depths.length - 1; i++) {
         const v = leftColorBar.values[i]
         if (!Number.isFinite(v)) continue
-        const y0 = ftToPx(leftColorBar.depths[i], depthMin, zoomFactor)
-        const y1 = ftToPx(leftColorBar.depths[i + 1], depthMin, zoomFactor)
-        ctx.fillStyle = leftColorBar.colors[v as number] || COLORS.lithUncertain
+        const d0 = leftColorBar.depths[i]
+        const d1 = leftColorBar.depths[i + 1]
+        if (d1 < sliceTopFt || d0 > sliceBotFt) continue
+        const y0 = ftToY(d0)
+        const y1 = ftToY(d1)
+        ctx.fillStyle = leftColorBar.colors[v as number] || palette.lithUncertain
         ctx.fillRect(0, y0, barWidth, Math.max(0.5, y1 - y0))
       }
-      ctx.strokeStyle = COLORS.border
+      ctx.strokeStyle = palette.border
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(barWidth + 0.5, 0)
-      ctx.lineTo(barWidth + 0.5, totalHeight)
+      ctx.lineTo(barWidth + 0.5, canvasH)
       ctx.stroke()
     }
 
     // 7) reference lines (vertical at curve-value positions)
     for (const ref of referenceLines) {
-      // Use the first curve's scale for the reference value
       const c = curves[0]
       if (!c) continue
       const x = curveValueToX(ref.value, c, width)
@@ -194,38 +228,48 @@ export default function TrackCanvas({
       ctx.setLineDash(ref.dashed ? [3, 3] : [])
       ctx.beginPath()
       ctx.moveTo(x, 0)
-      ctx.lineTo(x, totalHeight)
+      ctx.lineTo(x, canvasH)
       ctx.stroke()
       ctx.setLineDash([])
-      if (ref.label) {
+      if (ref.label && canvasTop === 0) {
         ctx.fillStyle = ref.color
-        ctx.font = '9px "Space Mono", monospace'
+        ctx.font = '500 9px "IBM Plex Mono", monospace'
         ctx.textBaseline = 'top'
         ctx.textAlign = 'left'
         ctx.fillText(ref.label, x + 3, 4)
       }
     }
 
-    // 8) curves — fills first, then strokes
+    // 8) curves — fills first, then strokes (only visible slice)
     for (const curve of curves) {
       const n = Math.min(curve.depths.length, curve.values.length)
       if (n === 0) continue
 
+      // Find first/last sample inside the slice (with one extra on each side
+      // so polylines continue cleanly off the edges).
+      let i0 = 0
+      while (i0 < n && curve.depths[i0] < sliceTopFt) i0++
+      i0 = Math.max(0, i0 - 1)
+      let i1 = n - 1
+      while (i1 > 0 && curve.depths[i1] > sliceBotFt) i1--
+      i1 = Math.min(n - 1, i1 + 1)
+      if (i1 <= i0) continue
+
       // Build polyline points (only valid samples)
       const points: { x: number; y: number }[] = []
-      for (let i = 0; i < n; i++) {
+      for (let i = i0; i <= i1; i++) {
         const v = curve.values[i]
+        const y = ftToY(curve.depths[i])
         if (v == null || !Number.isFinite(v)) {
-          // Push a break marker (null x) so we can split the line
-          points.push({ x: NaN, y: ftToPx(curve.depths[i], depthMin, zoomFactor) })
+          points.push({ x: NaN, y })
           continue
         }
         const x = curveValueToX(v, curve, width)
         if (x == null) {
-          points.push({ x: NaN, y: ftToPx(curve.depths[i], depthMin, zoomFactor) })
+          points.push({ x: NaN, y })
           continue
         }
-        points.push({ x, y: ftToPx(curve.depths[i], depthMin, zoomFactor) })
+        points.push({ x, y })
       }
 
       // Fill (left or right)
@@ -284,7 +328,8 @@ export default function TrackCanvas({
     }
   }, [
     width,
-    totalHeight,
+    canvasTop,
+    canvasH,
     depthMin,
     depthMax,
     zoomFactor,
@@ -292,63 +337,8 @@ export default function TrackCanvas({
     zones,
     referenceLines,
     leftColorBar,
+    palette,
   ])
-
-  // -------------------------------------------------- tooltip on hover
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const tooltip = document.getElementById('tooltip')
-    if (!tooltip) return
-
-    const onMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect()
-      const y = e.clientY - rect.top
-      const ft = depthMin + y / (PX_PER_FT * zoomFactor)
-      const lines: string[] = [`<strong>${ft.toFixed(1)} ft</strong>`]
-
-      for (let i = 0; i < curves.length; i++) {
-        const c = curves[i]
-        const depths = curveIndexes[i]
-        if (!depths || depths.length === 0) continue
-        // Binary search nearest depth
-        let lo = 0
-        let hi = depths.length - 1
-        while (lo < hi) {
-          const mid = (lo + hi) >> 1
-          if (depths[mid] < ft) lo = mid + 1
-          else hi = mid
-        }
-        const idx = lo
-        const v = c.values[idx]
-        if (v == null || !Number.isFinite(v)) {
-          lines.push(`<span style="color:${c.color}">${c.label}:</span> —`)
-        } else {
-          lines.push(
-            `<span style="color:${c.color}">${c.label}:</span> ${(v as number).toFixed(c.logScale ? 2 : 3)}`,
-          )
-        }
-      }
-
-      tooltip.innerHTML = lines.join('<br/>')
-      tooltip.classList.add('visible')
-      tooltip.style.left = `${e.clientX + 14}px`
-      tooltip.style.top = `${e.clientY + 14}px`
-      tooltipState.current.visible = true
-    }
-    const onLeave = () => {
-      tooltip.classList.remove('visible')
-      tooltipState.current.visible = false
-    }
-
-    canvas.addEventListener('mousemove', onMove)
-    canvas.addEventListener('mouseleave', onLeave)
-    return () => {
-      canvas.removeEventListener('mousemove', onMove)
-      canvas.removeEventListener('mouseleave', onLeave)
-      onLeave()
-    }
-  }, [curves, curveIndexes, depthMin, zoomFactor])
 
   return (
     <div
@@ -357,7 +347,7 @@ export default function TrackCanvas({
       className="relative border-r border-border bg-bg"
       id={`track-${id}`}
     >
-      <div className="sticky top-0 z-10 bg-bg-panel/95 border-b border-border h-[60px] px-2 py-1 flex flex-col">
+      <div className="sticky top-0 z-10 surface-track-stick border-b border-border h-[60px] px-2 py-1 flex flex-col">
         <div className="flex items-center justify-between">
           <span className="font-display text-[10px] uppercase tracking-widest text-text-bright">
             {label}
@@ -383,10 +373,10 @@ export default function TrackCanvas({
         </div>
         {/* Scale labels */}
         {scaleLabel && (
-          <div className="absolute bottom-0.5 left-1 right-1 flex justify-between font-mono text-[8px] text-text-dim/80">
+          <div className="absolute bottom-0.5 left-1 right-1 flex justify-between font-mono text-[8px] text-text-subtle80">
             <span>{scaleLabel[0]}</span>
             {scaleTicks && (
-              <span className="text-text-dim/60">
+              <span className="text-text-softer">
                 {scaleTicks
                   .map((t) =>
                     logScaleHeader
@@ -402,7 +392,17 @@ export default function TrackCanvas({
           </div>
         )}
       </div>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+      <div style={{ position: 'relative', height: totalHeight }}>
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: canvasTop,
+            display: 'block',
+          }}
+        />
+      </div>
     </div>
   )
 }

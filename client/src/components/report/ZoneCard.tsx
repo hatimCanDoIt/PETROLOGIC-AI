@@ -2,7 +2,7 @@ import clsx from 'clsx'
 
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
-import { COLORS } from '@/utils/colors'
+import { useChartPalette } from '@/theme/ThemeProvider'
 import type { HcZoneOut } from '@/types'
 
 interface ZoneCardProps {
@@ -18,8 +18,8 @@ function metric(label: string, value: string, color?: string) {
         {label}
       </span>
       <span
-        className="font-display text-sm"
-        style={{ color: color || COLORS.textBright }}
+        className={clsx('font-display text-sm', !color && 'text-text-bright')}
+        style={color ? { color } : undefined}
       >
         {value}
       </span>
@@ -28,9 +28,10 @@ function metric(label: string, value: string, color?: string) {
 }
 
 export default function ZoneCard({ zone, index, onJump }: ZoneCardProps) {
+  const palette = useChartPalette()
   const isOil = zone.zone_type === 'OIL'
   const tone = isOil ? 'oil' : 'gas'
-  const accent = isOil ? COLORS.oil : COLORS.gas
+  const accent = isOil ? palette.oil : palette.gas
 
   return (
     <div
@@ -65,11 +66,11 @@ export default function ZoneCard({ zone, index, onJump }: ZoneCardProps) {
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-3">
-        {metric('Shc', `${zone.shc_pct.toFixed(1)}%`, COLORS.reservoir)}
-        {metric('Sw', `${zone.sw_pct.toFixed(1)}%`, COLORS.sw)}
+        {metric('Shc', `${zone.shc_pct.toFixed(1)}%`, palette.reservoir)}
+        {metric('Sw', `${zone.sw_pct.toFixed(1)}%`, palette.sw)}
         {metric('ϕ_eff', `${zone.phi_pct.toFixed(1)}%`)}
         {metric('Vsh', `${zone.vsh_pct.toFixed(1)}%`)}
-        {metric('Rt', `${zone.rt_mean.toFixed(1)} Ω·m`, COLORS.rt)}
+        {metric('Rt', `${zone.rt_mean.toFixed(1)} Ω·m`, palette.rt)}
         {metric('GR', `${zone.gr_mean.toFixed(0)} GAPI`)}
         {metric('PEF', zone.pef_mean.toFixed(2))}
         {metric('BVW', zone.bvw_mean.toFixed(3))}
@@ -91,7 +92,7 @@ export default function ZoneCard({ zone, index, onJump }: ZoneCardProps) {
             className="h-full rounded-full transition-all"
             style={{
               width: `${Math.min(100, Math.max(0, zone.producible_pct))}%`,
-              background: `linear-gradient(90deg, ${COLORS.water}, ${COLORS.reservoir})`,
+              background: `linear-gradient(90deg, ${palette.water}, ${palette.reservoir})`,
             }}
           />
         </div>

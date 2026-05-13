@@ -9,7 +9,7 @@ interface TopBarProps {
 
 export default function TopBar({ title, subtitle, right, chips }: TopBarProps) {
   return (
-    <header className="border-b border-border bg-bg-panel/80 backdrop-blur px-6 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <header className="border-b border-border surface-header-bar px-6 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div className="flex flex-col gap-1">
         <h1 className="font-display text-lg uppercase tracking-widest text-text-bright">
           {title}

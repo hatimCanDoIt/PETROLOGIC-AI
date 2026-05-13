@@ -41,6 +41,8 @@ class UserMe(BaseModel):
     provider: str
     created_at: datetime
     well_count: int = 0
+    billing_plan: Optional[str] = None
+    billing_status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -6,6 +6,8 @@ import Login from '@/pages/Login'
 import Register from '@/pages/Register'
 import Dashboard from '@/pages/Dashboard'
 import Report from '@/pages/Report'
+import Subscription from '@/pages/Subscription'
+import Billing from '@/pages/Billing'
 import { useAuthStore } from '@/store/authStore'
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
@@ -57,6 +59,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Report />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/subscription"
+        element={
+          <ProtectedRoute>
+            <Subscription />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing"
+        element={
+          <ProtectedRoute>
+            <Billing />
           </ProtectedRoute>
         }
       />

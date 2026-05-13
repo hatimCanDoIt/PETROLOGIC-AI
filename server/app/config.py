@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     # CORS — comma-separated list; defaults include local dev frontends
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
+    # Stripe Billing (Checkout + Portal + webhook). Optional for local dev.
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_PRICE_SOLO_MONTHLY: Optional[str] = None
+    STRIPE_PRICE_SOLO_YEARLY: Optional[str] = None
+    STRIPE_PRICE_TEAM_SEAT_MONTHLY: Optional[str] = None
+    STRIPE_PRICE_TEAM_SEAT_YEARLY: Optional[str] = None
+    SOLO_TRIAL_DAYS: int = 7
+    # Shown on enterprise CTAs when no Stripe product exists for this tier.
+    BILLING_ENTERPRISE_CONTACT_EMAIL: str = "sales@example.com"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   CartesianGrid,
   Cell,
@@ -14,12 +14,14 @@ import {
   ZAxis,
 } from 'recharts'
 
-import { COLORS } from '@/utils/colors'
+import { useChartPalette } from '@/theme/ThemeProvider'
 import type { HcZoneOut, ResultJson } from '@/types'
 
 interface NDCrossplotProps {
   result: ResultJson
   zones: HcZoneOut[]
+  /** Persist chart height in localStorage per well */
+  wellId?: string
 }
 
 interface Point {
@@ -30,7 +32,98 @@ interface Point {
   kind: 'bg' | 'oil' | 'gas'
 }
 
-export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
+const ND_XP_H_LS = 'petrologic:ndCrossplotH:'
+const DEFAULT_CHART_PANEL_H = 520
+const MIN_CHART_PANEL_H = 300
+const MAX_CHART_PANEL_H = 920
+
+function clampPanelH(n: number) {
+  return Math.min(MAX_CHART_PANEL_H, Math.max(MIN_CHART_PANEL_H, Math.round(n)))
+}
+
+function readStoredChartHeight(wellId?: string): number {
+  if (!wellId) return DEFAULT_CHART_PANEL_H
+  try {
+    const n = Number(localStorage.getItem(ND_XP_H_LS + wellId))
+    if (Number.isFinite(n)) return clampPanelH(n)
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_CHART_PANEL_H
+}
+
+/** Drag down to grow height of the panel above this strip */
+function HorizontalResizeStrip({
+  ariaLabel,
+  height,
+  onCommitHeight,
+}: {
+  ariaLabel: string
+  height: number
+  onCommitHeight: (n: number) => void
+}) {
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = height
+
+    const move = (ev: PointerEvent) => {
+      onCommitHeight(clampPanelH(startH + (ev.clientY - startY)))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      document.body.style.removeProperty('user-select')
+    }
+    window.addEventListener('pointermove', move, { passive: true })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    document.body.style.userSelect = 'none'
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={ariaLabel}
+      onPointerDown={onPointerDown}
+      className="mt-1 shrink-0 cursor-row-resize select-none rounded-b-md bg-border/70 py-1.5 hover:bg-accent/40 active:bg-accent touch-none outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      style={{ touchAction: 'none' }}
+      tabIndex={0}
+      onKeyDown={(ev) => {
+        const step = ev.shiftKey ? 16 : 6
+        if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+          ev.preventDefault()
+          const dir = ev.key === 'ArrowDown' ? 1 : -1
+          onCommitHeight(clampPanelH(height + dir * step))
+        }
+      }}
+    />
+  )
+}
+
+export default function NDCrossplot({ result, zones, wellId }: NDCrossplotProps) {
+  const palette = useChartPalette()
+  const [panelHeight, setPanelHeight] = useState(DEFAULT_CHART_PANEL_H)
+
+  useEffect(() => {
+    setPanelHeight(readStoredChartHeight(wellId))
+  }, [wellId])
+
+  useEffect(() => {
+    if (!wellId) return
+    const t = window.setTimeout(() => {
+      try {
+        localStorage.setItem(ND_XP_H_LS + wellId, String(panelHeight))
+      } catch {
+        /* ignore */
+      }
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [wellId, panelHeight])
+
   const data = useMemo<Point[]>(() => {
     const out: Point[] = []
     const nphi = result.overview.NPHI
@@ -97,45 +190,48 @@ export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
   }, [zones, result.overview])
 
   return (
-    <div className="w-full h-[520px] panel p-4">
-      <div className="flex items-baseline justify-between mb-2">
+    <div
+      className="w-full panel flex flex-col overflow-hidden p-0 min-w-0"
+      style={{ height: panelHeight }}
+    >
+      <div className="flex shrink-0 items-baseline justify-between px-4 pt-4 pb-2">
         <h3 className="font-display text-sm uppercase tracking-widest text-text-bright">
           Neutron-Density Crossplot
         </h3>
-        <span className="font-mono text-[10px] text-text-dim">
-          {data.length} samples
-        </span>
+        <span className="font-mono text-[10px] text-text-dim">{data.length} samples</span>
       </div>
-      <ResponsiveContainer width="100%" height="85%">
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4" style={{ minHeight: 0 }}>
+        <ResponsiveContainer width="100%" height="100%">
         <ScatterChart margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
-          <CartesianGrid stroke="#162840" strokeDasharray="2 4" />
+          <CartesianGrid stroke={palette.border} strokeDasharray="2 4" />
           <XAxis
             type="number"
             dataKey="x"
             domain={[0, 60]}
-            tick={{ fill: COLORS.textDim, fontSize: 11, fontFamily: 'Space Mono' }}
-            stroke={COLORS.border}
+            tick={{ fill: palette.textDim, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+            stroke={palette.border}
           >
-            <Label value="NPHI (%)" position="insideBottom" offset={-10} fill={COLORS.textDim} />
+            <Label value="NPHI (%)" position="insideBottom" offset={-10} fill={palette.textDim} />
           </XAxis>
           <YAxis
             type="number"
             dataKey="y"
             domain={[-10, 50]}
-            tick={{ fill: COLORS.textDim, fontSize: 11, fontFamily: 'Space Mono' }}
-            stroke={COLORS.border}
+            tick={{ fill: palette.textDim, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+            stroke={palette.border}
           >
-            <Label value="DPHI (%)" angle={-90} position="insideLeft" fill={COLORS.textDim} />
+            <Label value="DPHI (%)" angle={-90} position="insideLeft" fill={palette.textDim} />
           </YAxis>
           <ZAxis range={[20, 60]} />
           <Tooltip
-            cursor={{ stroke: COLORS.accent, strokeDasharray: '3 3' }}
+            cursor={{ stroke: palette.accent, strokeDasharray: '3 3' }}
             contentStyle={{
-              background: COLORS.bgDeep,
-              border: `1px solid ${COLORS.border}`,
-              fontFamily: 'Space Mono',
+              background: palette.bgPanel,
+              border: `1px solid ${palette.border}`,
+              fontFamily: 'IBM Plex Sans',
               fontSize: 11,
-              color: COLORS.text,
+              color: palette.text,
             }}
             formatter={(value: number, name: string, props: { payload?: Point }) => {
               if (props?.payload) {
@@ -156,7 +252,11 @@ export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
             }}
           />
           <Legend
-            wrapperStyle={{ fontFamily: 'Space Mono', fontSize: 11, color: COLORS.textDim }}
+            wrapperStyle={{
+              fontFamily: 'IBM Plex Mono',
+              fontSize: 11,
+              color: palette.textDim,
+            }}
           />
 
           {/* 1:1 diagonal */}
@@ -165,11 +265,11 @@ export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
               { x: 0, y: 0 },
               { x: 60, y: 60 },
             ]}
-            stroke={COLORS.borderLight}
+            stroke={palette.borderLight}
             strokeDasharray="3 3"
             label={{
               value: 'Limestone (1:1)',
-              fill: COLORS.lithLimestone,
+              fill: palette.lithLimestone,
               fontSize: 10,
               position: 'insideTopRight',
             }}
@@ -180,7 +280,7 @@ export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
               { x: 0, y: 6 },
               { x: 60, y: 38 },
             ]}
-            stroke={COLORS.lithSandstone}
+            stroke={palette.lithSandstone}
             strokeDasharray="2 4"
           />
           {/* Dolomite line: shifted down ~5 */}
@@ -189,21 +289,21 @@ export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
               { x: 0, y: -5 },
               { x: 60, y: 25 },
             ]}
-            stroke={COLORS.lithDolomite}
+            stroke={palette.lithDolomite}
             strokeDasharray="2 4"
           />
 
-          <Scatter name="Clean (GR<50)" data={cleanPts} fill={COLORS.reservoir} fillOpacity={0.45} />
-          <Scatter name="Mid (50-80)" data={midPts} fill={COLORS.accent} fillOpacity={0.3} />
-          <Scatter name="Shale (GR>80)" data={shalePts} fill={COLORS.vsh} fillOpacity={0.18} />
-          <Scatter name="Oil zones" data={hcPoints.filter((p) => p.kind === 'oil')} fill={COLORS.oil}>
+          <Scatter name="Clean (GR<50)" data={cleanPts} fill={palette.reservoir} fillOpacity={0.45} />
+          <Scatter name="Mid (50-80)" data={midPts} fill={palette.accent} fillOpacity={0.3} />
+          <Scatter name="Shale (GR>80)" data={shalePts} fill={palette.vsh} fillOpacity={0.18} />
+          <Scatter name="Oil zones" data={hcPoints.filter((p) => p.kind === 'oil')} fill={palette.oil}>
             {hcPoints
               .filter((p) => p.kind === 'oil')
               .map((_, i) => (
                 <Cell key={`oil-${i}`} r={8} />
               ))}
           </Scatter>
-          <Scatter name="Gas zones" data={hcPoints.filter((p) => p.kind === 'gas')} fill={COLORS.gas}>
+          <Scatter name="Gas zones" data={hcPoints.filter((p) => p.kind === 'gas')} fill={palette.gas}>
             {hcPoints
               .filter((p) => p.kind === 'gas')
               .map((_, i) => (
@@ -212,10 +312,18 @@ export default function NDCrossplot({ result, zones }: NDCrossplotProps) {
           </Scatter>
         </ScatterChart>
       </ResponsiveContainer>
-      <p className="font-mono text-[10px] text-text-dim mt-2">
-        ← Gas effect (low NPHI, high DPHI) drives points toward upper-left · Heavy
-        shales fall lower-right
+      </div>
+
+      <p className="shrink-0 px-4 pt-3 pb-1 font-mono text-[10px] text-text-dim leading-snug">
+        ← Gas effect (low NPHI, high DPHI) drives points toward upper-left · Heavy shales fall
+        lower-right
       </p>
+
+      <HorizontalResizeStrip
+        ariaLabel="Resize crossplot height — drag vertically"
+        height={panelHeight}
+        onCommitHeight={setPanelHeight}
+      />
     </div>
   )
 }

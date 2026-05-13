@@ -10,6 +10,8 @@ export interface UserMe extends UserPublic {
   provider: string
   created_at: string
   well_count: number
+  billing_plan?: string | null
+  billing_status?: string | null
 }
 
 export interface TokenResponse {
@@ -61,6 +63,7 @@ export type CurveArrays = {
   RHOZ: (number | null)[]
   RT: (number | null)[]
   PEF: (number | null)[]
+  SP?: (number | null)[]
   Vsh: (number | null)[]
   phi_eff: (number | null)[]
   Sw: (number | null)[]
@@ -89,6 +92,15 @@ export interface ResultJson {
       limestone_pct: number
       uncertain_pct: number
     }
+    rho_ma_auto?: boolean
+    Rw_auto?: boolean
+    sp_used?: boolean
+    sp_shale_baseline?: number | null
+    sp_sand_line?: number | null
+    /** ELAN/vendor porosity curve was merged (PIGN, PHIT, TPHI, …) */
+    used_phi_input?: boolean
+    /** ELAN/RST/vendor Sw curve was merged (SUWI, SW, …) */
+    used_sw_input?: boolean
   }
   curve_map?: Record<string, string>
   validation?: Record<string, unknown>
@@ -127,9 +139,9 @@ export interface AIInterpretation {
 }
 
 export interface PetroParams {
-  rho_ma: number
+  rho_ma: number | null
   rho_fl: number
-  Rw: number
+  Rw: number | null
   a: number
   m: number
   n: number

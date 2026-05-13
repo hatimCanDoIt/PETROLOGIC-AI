@@ -27,7 +27,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         ref={ref}
         id={inputId}
         className={clsx(
-          'h-10 px-3 rounded-md bg-bg-deep border text-text placeholder:text-text-dim/60',
+          'h-10 px-3 rounded-md bg-bg-deep border text-text placeholder:text-text-softer',
           'transition-colors focus:outline-none focus:border-accent',
           error ? 'border-gas' : 'border-border',
           className,

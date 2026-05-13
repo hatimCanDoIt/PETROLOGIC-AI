@@ -10,11 +10,55 @@ data file. The fixture intentionally includes:
 
 from __future__ import annotations
 
-import io
+import asyncio
 import textwrap
+from pathlib import Path
 
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app import database
+from app.database import Base, get_db
+from app.main import app
+
+
+@pytest.fixture(scope="module")
+def client():
+    # Use a file-backed sqlite so the same engine survives across the test.
+    db_file = Path("./_test_petrologic.sqlite")
+    if db_file.exists():
+        db_file.unlink()
+
+    test_url = f"sqlite+aiosqlite:///{db_file.resolve().as_posix()}"
+    test_engine = create_async_engine(test_url, future=True)
+    test_session = async_sessionmaker(test_engine, expire_on_commit=False)
+
+    database.engine = test_engine
+    database.AsyncSessionLocal = test_session
+
+    async def _override():
+        async with test_session() as s:
+            try:
+                yield s
+            finally:
+                await s.close()
+
+    app.dependency_overrides[get_db] = _override
+
+    async def _init():
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.get_event_loop().run_until_complete(_init())
+
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+    if db_file.exists():
+        db_file.unlink()
 
 
 def _synthetic_las_text(
