@@ -120,6 +120,8 @@ const TRACK_WIDTH_MIN = 100
 const TRACK_WIDTH_MAX = 520
 const RULER_WIDTH_MIN = 52
 const RULER_WIDTH_MAX = 160
+/** Must match the resize handle `width` below — used to compute total log strip width. */
+const RESIZE_STRIP_PX = 11
 
 const LOG_LAYOUT_LS_PREFIX = 'petrologic:logLayout:'
 function logLayoutStorageKey(storageKey: string) {
@@ -132,6 +134,65 @@ function defaultTrackWidth(trackId: string): number {
 
 function clampSize(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n))
+}
+
+/**
+ * When the log viewport width changes (e.g. Report RHS resize), spread the delta
+ * across visible tracks evenly so tracks stay flush with the analysis panel instead
+ * of overflowing horizontally.
+ */
+function redistributeVisibleTrackWidths(
+  ids: string[],
+  prev: Record<string, number>,
+  targetSum: number,
+): Record<string, number> | null {
+  const n = ids.length
+  if (n === 0) return null
+
+  const cur = ids.map((id) => prev[id] ?? defaultTrackWidth(id))
+  const sumCur = cur.reduce((a, b) => a + b, 0)
+  if (sumCur === targetSum) return null
+
+  const minTotal = n * TRACK_WIDTH_MIN
+  if (targetSum < minTotal) {
+    const out = { ...prev }
+    for (const id of ids) out[id] = TRACK_WIDTH_MIN
+    return out
+  }
+
+  const delta = targetSum - sumCur
+  const baseAdd = Math.trunc(delta / n)
+  let rem = delta - baseAdd * n
+  const w = cur.map((c) => clampSize(c + baseAdd, TRACK_WIDTH_MIN, TRACK_WIDTH_MAX))
+
+  let safety = 0
+  while (rem !== 0 && safety++ < 10_000) {
+    if (rem > 0) {
+      const idx = w.findIndex((x) => x < TRACK_WIDTH_MAX)
+      if (idx < 0) break
+      w[idx]++
+      rem--
+    } else {
+      let idx = -1
+      for (let i = w.length - 1; i >= 0; i--) {
+        if (w[i] > TRACK_WIDTH_MIN) {
+          idx = i
+          break
+        }
+      }
+      if (idx < 0) break
+      w[idx]--
+      rem++
+    }
+  }
+
+  const out = { ...prev }
+  let changed = false
+  ids.forEach((id, i) => {
+    if (out[id] !== w[i]) changed = true
+    out[id] = w[i]
+  })
+  return changed ? out : null
 }
 
 /**
@@ -182,7 +243,7 @@ function ResizeStrip({
       className="group relative sticky top-0 z-[35] shrink-0 cursor-col-resize select-none touch-none outline-none transition-colors surface-header-bar hover:bg-accent/[0.12] active:bg-accent/[0.22] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
       style={{
         touchAction: 'none',
-        width: 11,
+        width: RESIZE_STRIP_PX,
         height: TRACK_HEADER_PX,
         alignSelf: 'flex-start',
       }}
@@ -614,6 +675,42 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     () => tracks.filter((t) => trackVisible[t.id] !== false),
     [tracks, trackVisible],
   )
+
+  const visibleTrackIds = useMemo(
+    () => visibleTracks.map((t) => t.id).join(','),
+    [visibleTracks],
+  )
+
+  // Keep total track width matched to the log viewport so resizing the Report RHS (or the
+  // window) scales every visible track by the same delta instead of overflowing under the panel.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    if (!visibleTrackIds) return
+
+    const ids = visibleTrackIds.split(',')
+
+    const run = () => {
+      const viewportW = Math.floor(el.clientWidth)
+      if (!Number.isFinite(viewportW) || viewportW <= 0) return
+
+      const n = ids.length
+      const stripChrome = (1 + n) * RESIZE_STRIP_PX
+      const chrome = depthRulerWidth + stripChrome
+      const targetSum = viewportW - chrome
+      if (targetSum <= 0) return
+
+      setTrackWidths((prev) => {
+        const next = redistributeVisibleTrackWidths(ids, prev, targetSum)
+        return next ?? prev
+      })
+    }
+
+    const ro = new ResizeObserver(() => run())
+    ro.observe(el)
+    run()
+    return () => ro.disconnect()
+  }, [visibleTrackIds, depthRulerWidth])
 
   const toggleTrackId = (id: string) => {
     setTrackVisible((prev) => ({
