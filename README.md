@@ -28,7 +28,7 @@ _(Add screenshots to `docs/screenshots/` once captured.)_
 | Backend     | Python 3.11+, FastAPI, uvicorn, SQLAlchemy 2.0 (async + asyncpg), Alembic         |
 | Petro engine| numpy, pandas, lasio                                                              |
 | Auth        | python-jose (JWT), passlib (bcrypt), authlib + httpx (Google OAuth, optional)     |
-| AI          | Anthropic Claude `claude-sonnet-4-20250514` via the official `anthropic` SDK      |
+| AI          | Anthropic Claude `claude-sonnet-4-6` via the official `anthropic` SDK             |
 | Frontend    | React 18 + Vite + TypeScript, Tailwind CSS v3, Zustand, React Query v5, Recharts  |
 | Visuals     | HTML Canvas (log tracks), Framer Motion, react-dropzone                           |
 | Database    | PostgreSQL 15 (tests use SQLite via `aiosqlite`)                                  |
@@ -127,7 +127,7 @@ boots a Vite dev server on :5173.
 | `GOOGLE_CLIENT_SECRET`   |                                                                                       | Google OAuth client secret.                                |
 | `GOOGLE_REDIRECT_URI`    | `http://localhost:8000/api/auth/google/callback`                                      | OAuth callback URL — must match Google console.            |
 | `ANTHROPIC_API_KEY`      |                                                                                       | If unset, AI interpretation returns a graceful error.      |
-| `ANTHROPIC_MODEL`        | `claude-sonnet-4-20250514`                                                            | Claude model identifier.                                   |
+| `ANTHROPIC_MODEL`        | `claude-sonnet-4-6`                                                                   | Claude model identifier.                                   |
 | `FRONTEND_URL`           | `http://localhost:5173`                                                               | OAuth callback redirects here.                             |
 | `MAX_UPLOAD_MB`          | `50`                                                                                  | LAS upload size limit.                                     |
 | `CORS_ORIGINS`           | `http://localhost:5173,http://localhost:3000`                                          | Comma-separated allow-list for CORS.                       |

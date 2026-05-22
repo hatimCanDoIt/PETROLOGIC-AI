@@ -20,6 +20,13 @@ export interface TokenResponse {
   user: UserPublic
 }
 
+/**
+ * Mirrors ``AnalysisMode`` in ``server/app/schemas/well.py``:
+ *   - 'deterministic' → numpy engine; LLM only narrates.
+ *   - 'llm'           → numpy curves; LLM picks zones from them.
+ */
+export type AnalysisMode = 'deterministic' | 'llm'
+
 export interface HcZoneOut {
   id: string
   zone_type: 'OIL' | 'GAS'
@@ -37,6 +44,10 @@ export interface HcZoneOut {
   producible_pct: number
   lith_flag: string
   ai_note: string | null
+  /** Free-text explanation supplied by the LLM zone picker (mode="llm"). */
+  ai_rationale?: string | null
+  /** 'high' | 'medium' | 'low' confidence — only set when LLM picked the zone. */
+  ai_confidence?: 'high' | 'medium' | 'low' | null
 }
 
 export interface WellSummary {
@@ -53,6 +64,7 @@ export interface WellSummary {
   zone_count: number
   oil_zone_count: number
   gas_zone_count: number
+  analysis_mode: AnalysisMode
 }
 
 export type CurveArrays = {
@@ -62,6 +74,8 @@ export type CurveArrays = {
   DPHI: (number | null)[]
   RHOZ: (number | null)[]
   RT: (number | null)[]
+  /** Additional resistivity mnemonics for comparison (downsampled overview). */
+  rt_curves?: Record<string, (number | null)[]>
   PEF: (number | null)[]
   SP?: (number | null)[]
   Vsh: (number | null)[]
@@ -94,6 +108,7 @@ export interface ResultJson {
     }
     rho_ma_auto?: boolean
     Rw_auto?: boolean
+    Rw_method?: string | null
     sp_used?: boolean
     sp_shale_baseline?: number | null
     sp_sand_line?: number | null
@@ -105,6 +120,23 @@ export interface ResultJson {
   curve_map?: Record<string, string>
   validation?: Record<string, unknown>
   raw_arrays?: Record<string, (number | null)[]>
+  /**
+   * Metadata from whichever LLM picker ran — populated for every non-
+   * deterministic analysis mode. The shape is a discriminated union on
+   * ``mode``; presence of the various fields depends on which mode ran.
+   */
+  zone_picker?: {
+    mode: AnalysisMode
+    model?: string
+    generated_at?: string
+    /** llm — number of zones the LLM picked. */
+    zone_count?: number
+    depth_range_ft?: [number, number]
+    well_summary?: string | null
+    error?: string
+    raw_text?: string
+    skipped?: string[]
+  }
 }
 
 export interface AIZoneInterpretation {

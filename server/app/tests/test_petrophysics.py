@@ -228,6 +228,29 @@ def test_auto_estimates_rw_in_wet_zone():
     assert 0.5 * Rw_true <= res.params_used.Rw <= 2.0 * Rw_true
 
 
+def test_sp_shale_baseline_higher_than_sand_line():
+    """Shale reference must sit above sand line (high SP = shale, low = sand)."""
+    depth = np.arange(8000.0, 8100.0, 0.5)
+    n = len(depth)
+    GR = np.where(depth < 8050, 110.0, 20.0)  # shale then clean sand
+    SP = np.where(GR > 80, -8.0, -95.0)  # shale high, sand low
+    df = _df(
+        DEPT=depth,
+        GR=GR,
+        NPHI=np.full(n, 0.25),
+        RHOZ=np.full(n, 2.50),
+        RT=np.full(n, 10.0),
+        SP=SP,
+        PEF=np.full(n, 2.0),
+    )
+    cm = {"GR": "GR", "NPHI": "NPHI", "RHOZ": "RHOZ", "RT": "RT", "SP": "SP", "PEF": "PEF"}
+    res = run_petrophysics(df, cm, PetroParams(rho_ma=2.71, Rw=0.1, GR_clean=20.0, GR_shale=110.0))
+    assert res.sp_used is True
+    assert res.sp_shale_baseline is not None
+    assert res.sp_sand_line is not None
+    assert res.sp_shale_baseline > res.sp_sand_line
+
+
 def test_sp_filter_excludes_impermeable_zone():
     """SP that stays at the shale baseline should disqualify an HC zone even
     when GR/RT/phi alone would have flagged it."""
@@ -305,3 +328,102 @@ def test_rst_style_processed_sw_without_rt():
     assert res.used_sw_input is True
     assert res.used_phi_input is True
     assert len(res.zones) >= 1
+
+
+def test_auto_rw_prefers_rwa_curve():
+    rng = np.random.default_rng(0)
+    depth = np.arange(0, 400, 0.5)
+    n = len(depth)
+    phi = np.full(n, 0.22)
+    RT = np.full(n, 8.0)
+    RWA = np.full(n, 0.08) + rng.normal(0, 0.002, n)
+    GR = np.full(n, 25.0)
+    df = _df(DEPT=depth, GR=GR, NPHI=phi, RHOZ=np.full(n, 2.35), RT=RT, RWA=RWA)
+    cm = {
+        "GR": "GR",
+        "NPHI": "NPHI",
+        "RHOZ": "RHOZ",
+        "RT": "RT",
+        "RWA": "RWA",
+    }
+    res = run_petrophysics(df, cm, PetroParams(rho_ma=2.71, GR_clean=20.0, GR_shale=110.0))
+    assert res.Rw_method == "rwa_curve_p10"
+    assert res.params_used.Rw == pytest.approx(0.08, rel=0.15)
+
+
+def test_shaly_neutron_phi_weights_dphi():
+    """When NPHI >> DPHI, total porosity should be DPHI-biased."""
+    from app.core.petrophysics import _phi_from_neutron_density
+
+    nphi = np.array([0.35])
+    dphi = np.array([0.20])
+    phi = _phi_from_neutron_density(nphi, dphi)
+    avg = (0.35 + 0.20) / 2
+    weighted = (2 * 0.20 + 0.35) / 3
+    assert phi[0] == pytest.approx(weighted, rel=1e-6)
+    assert phi[0] < avg
+
+
+def test_vendor_dphz_used_when_present():
+    depth = np.array([100.0, 101.0])
+    df = _df(
+        DEPT=depth,
+        GR=[40, 40],
+        NPHI=[0.20, 0.20],
+        RHOZ=[2.71, 2.40],
+        RT=[10, 10],
+        DPHZ=[0.05, 0.30],
+    )
+    cm = {
+        "GR": "GR",
+        "NPHI": "NPHI",
+        "RHOZ": "RHOZ",
+        "RT": "RT",
+        "DPHI_INPUT": "DPHZ",
+    }
+    res = run_petrophysics(df, cm, PetroParams(rho_ma=2.71, rho_fl=1.0, Rw=0.1))
+    assert res.DPHI[0] == pytest.approx(0.05, abs=1e-6)
+    assert res.DPHI[1] == pytest.approx(0.30, abs=1e-6)
+
+
+def test_rw_from_sp_ssp():
+    from app.core.petrophysics import _rw_from_sp_deflection, _rmf_at_bht
+
+    raw = {"RMFS": "1.217", "MFST": "74.9", "BHT": "220.0"}
+    rmf = _rmf_at_bht(raw)
+    assert rmf is not None
+    # SSP ~ 94 mV, K ~ 72 at 220 F → Rw in few hundredths ohm·m
+    rw = _rw_from_sp_deflection(rmf, 94.0, 72.0)
+    assert 0.005 < rw < 0.08
+
+
+def test_low_rt_invasion_pay():
+    """Low deep Rt with high Rxo/Rt and Rwa > Rw should flag pay."""
+    n = 120
+    depth = np.arange(8000.0, 8060.0, 0.5)
+    GR = np.where(depth < 8030, 110.0, 28.0)
+    NPHI = np.where(depth < 8030, 0.35, 0.34)
+    RHOZ = np.where(depth < 8030, 2.55, 2.05)
+    RT = np.where(depth < 8030, 2.0, 0.60)
+    RT_sh = np.where(depth < 8030, 2.0, 1.60)
+    RT_mi = np.where(depth < 8030, 2.0, 6.20)
+    SP = np.where(depth < 8030, -8.0, -150.0)
+    df = _df(
+        DEPT=depth, GR=GR, NPHI=NPHI, RHOZ=RHOZ, RT=RT,
+        AT10=RT_sh, RXO8=RT_mi, SP=SP, PEF=np.full(n, 1.8),
+    )
+    cm = {
+        "GR": "GR", "NPHI": "NPHI", "RHOZ": "RHOZ", "RT": "RT",
+        "RT_SHALLOW": "AT10", "RT_MICRO": "RXO8", "SP": "SP", "PEF": "PEF",
+    }
+    raw = {"RMFS": "1.217", "MFST": "74.9", "BHT": "220.0"}
+    res = run_petrophysics(
+        df, cm, PetroParams(rho_ma=2.71, GR_clean=20.0, GR_shale=110.0),
+        las_raw_params=raw,
+    )
+    assert res.sp_used is True
+    assert res.Rw_method == "sp_ssp"
+    assert len(res.zones) >= 1
+    pay = res.zones[0]
+    assert pay["type"] in ("OIL", "GAS")
+    assert pay["top_ft"] >= 8030.0

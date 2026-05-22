@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+# "deterministic" → numpy engine, LLM only narrates the result.
+# "llm"           → numpy engine, LLM picks zones from the computed curves.
+AnalysisMode = Literal["deterministic", "llm"]
 
 
 class HcZoneOut(BaseModel):
@@ -25,6 +30,9 @@ class HcZoneOut(BaseModel):
     producible_pct: float
     lith_flag: str
     ai_note: Optional[str] = None
+    # Populated only when the LLM picked the zone.
+    ai_rationale: Optional[str] = None
+    ai_confidence: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,6 +53,7 @@ class WellSummary(BaseModel):
     zone_count: int = 0
     oil_zone_count: int = 0
     gas_zone_count: int = 0
+    analysis_mode: AnalysisMode = "deterministic"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -72,6 +81,9 @@ class ReanalyzeRequest(BaseModel):
     phi_cutoff: Optional[float] = Field(default=None, ge=0, le=1)
     Vsh_cutoff: Optional[float] = Field(default=None, ge=0, le=1)
     Sw_producible: Optional[float] = Field(default=None, ge=0, le=1)
+    # If supplied, switch the well's analysis mode for this re-run. Omitted
+    # → keep the mode the well was last analyzed with.
+    analysis_mode: Optional[AnalysisMode] = None
 
 
 class WellStatsResponse(BaseModel):

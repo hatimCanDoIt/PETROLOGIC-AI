@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Spinner from '@/components/ui/Spinner'
 import { useUploadWell } from '@/hooks/useWell'
+import type { AnalysisMode } from '@/types'
 
 type Stage = 'idle' | 'parsing' | 'petro' | 'ai' | 'done'
 
@@ -20,17 +21,45 @@ const STAGE_LABEL: Record<Stage, string> = {
 
 const STAGE_ORDER: Stage[] = ['parsing', 'petro', 'ai', 'done']
 
+const MODE_LABEL_BY_STAGE: Record<AnalysisMode, Record<Stage, string>> = {
+  deterministic: STAGE_LABEL,
+  llm: {
+    idle: 'Analyze Well',
+    parsing: 'Parsing LAS…',
+    petro: 'Computing Curves…',
+    ai: 'Sonnet Picking Zones…',
+    done: 'Done',
+  },
+}
+
+const MODE_OPTIONS: { value: AnalysisMode; title: string; blurb: string }[] = [
+  {
+    value: 'deterministic',
+    title: 'Numpy + LLM interpret',
+    blurb:
+      'Deterministic petrophysics picks the zones and computes every curve; Claude only narrates them. Fast, reproducible, defensible.',
+  },
+  {
+    value: 'llm',
+    title: 'Numpy + LLM pay zones',
+    blurb:
+      'Numpy computes the curves; Claude Sonnet reads them and picks the pay zones. Per-zone numbers stay deterministic.',
+  },
+]
+
 export default function UploadZone() {
   const navigate = useNavigate()
   const upload = useUploadWell()
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [rhoMa, setRhoMa] = useState<string>('2.71')
-  const [rw, setRw] = useState<string>('1.0')
+  // Blank = server estimates from the LAS (see petrophysics._auto_rw / _auto_rho_ma).
+  const [rhoMa, setRhoMa] = useState<string>('')
+  const [rw, setRw] = useState<string>('')
   const [a, setA] = useState<string>('1.0')
   const [m, setM] = useState<string>('2.0')
   const [n, setN] = useState<string>('2.0')
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('deterministic')
   const [stage, setStage] = useState<Stage>('idle')
 
   const onDrop = useCallback((accepted: File[]) => {
@@ -79,6 +108,7 @@ export default function UploadZone() {
         a: numOrUndef(a),
         m: numOrUndef(m),
         n: numOrUndef(n),
+        analysis_mode: analysisMode,
       })
       setStage('done')
       navigate(`/report/${result.id}`)
@@ -135,13 +165,75 @@ export default function UploadZone() {
         )}
       </div>
 
+      <div className="mt-5">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-text-dim mb-2">
+          Analysis method
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {MODE_OPTIONS.map((opt) => {
+            const selected = analysisMode === opt.value
+            return (
+              <label
+                key={opt.value}
+                className={clsx(
+                  'cursor-pointer rounded-lg border p-3 transition-all',
+                  selected
+                    ? 'border-accent bg-accent/5 shadow-glow-accent'
+                    : 'border-border hover:border-accent/60 hover:bg-bg-deep',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="analysis-mode"
+                  value={opt.value}
+                  checked={selected}
+                  onChange={() => setAnalysisMode(opt.value)}
+                  className="sr-only"
+                />
+                <div className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className={clsx(
+                      'inline-block h-3 w-3 rounded-full border',
+                      selected
+                        ? 'border-accent bg-accent shadow-glow-accent'
+                        : 'border-border',
+                    )}
+                  />
+                  <span className="font-mono text-[11px] uppercase tracking-wider text-text-bright">
+                    {opt.title}
+                  </span>
+                </div>
+                <p className="mt-1 ml-5 text-xs text-text-dim">{opt.blurb}</p>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
       {showAdvanced && (
-        <div className="mt-5 grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Input label="ρₘₐ (g/cc)" value={rhoMa} onChange={(e) => setRhoMa(e.target.value)} />
-          <Input label="Rw (Ω·m)" value={rw} onChange={(e) => setRw(e.target.value)} />
-          <Input label="Archie a" value={a} onChange={(e) => setA(e.target.value)} />
-          <Input label="Archie m" value={m} onChange={(e) => setM(e.target.value)} />
-          <Input label="Archie n" value={n} onChange={(e) => setN(e.target.value)} />
+        <div className="mt-5 space-y-3">
+          <p className="text-xs text-text-dim">
+            Leave ρₘₐ and Rw blank to estimate from the log. Only fill these if you
+            want to override the automatic values.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <Input
+              label="ρₘₐ (g/cc)"
+              value={rhoMa}
+              onChange={(e) => setRhoMa(e.target.value)}
+              placeholder="auto"
+            />
+            <Input
+              label="Rw (Ω·m)"
+              value={rw}
+              onChange={(e) => setRw(e.target.value)}
+              placeholder="auto"
+            />
+            <Input label="Archie a" value={a} onChange={(e) => setA(e.target.value)} />
+            <Input label="Archie m" value={m} onChange={(e) => setM(e.target.value)} />
+            <Input label="Archie n" value={n} onChange={(e) => setN(e.target.value)} />
+          </div>
         </div>
       )}
 
@@ -154,7 +246,7 @@ export default function UploadZone() {
       <div className="mt-5 flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs font-mono text-text-dim">
           {stage !== 'idle' && stage !== 'done' && <Spinner size={12} />}
-          <span>{STAGE_LABEL[stage]}</span>
+          <span>{MODE_LABEL_BY_STAGE[analysisMode][stage]}</span>
         </div>
         <Button
           disabled={!file || (stage !== 'idle' && stage !== 'done')}
@@ -162,7 +254,9 @@ export default function UploadZone() {
           onClick={submit}
           size="lg"
         >
-          {stage === 'idle' || stage === 'done' ? 'Analyze Well' : STAGE_LABEL[stage]}
+          {stage === 'idle' || stage === 'done'
+            ? 'Analyze Well'
+            : MODE_LABEL_BY_STAGE[analysisMode][stage]}
         </Button>
       </div>
     </div>

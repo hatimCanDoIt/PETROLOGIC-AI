@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef } from 'react'
 
 import { PX_PER_FT } from '@/utils/colors'
 import { useChartPalette } from '@/theme/ThemeProvider'
+import { toColorInputValue, type LogCurveColorKey } from '@/utils/logCurveColors'
+import {
+  canvasLineDash,
+  type LogCurveLineStyle,
+} from '@/utils/logCurveStyles'
 
 export interface CurveConfig {
   depths: number[]
@@ -16,6 +21,12 @@ export interface CurveConfig {
   fillRight?: boolean
   fillColor?: string
   dashed?: boolean
+  lineStyle?: LogCurveLineStyle
+  /** ``dots`` = Excel-style markers (no connecting line); default ``line``. */
+  renderMode?: 'line' | 'dots'
+  dotRadius?: number
+  /** When set, a color picker is shown in the track header for this curve. */
+  colorKey?: LogCurveColorKey
   label: string
 }
 
@@ -30,6 +41,9 @@ export interface ReferenceLine {
   color: string
   label?: string
   dashed?: boolean
+  lineStyle?: LogCurveLineStyle
+  /** Match ``CurveConfig.label`` for x-axis scale (default: first curve). */
+  curveLabel?: string
 }
 
 export interface TrackCanvasProps {
@@ -49,6 +63,9 @@ export interface TrackCanvasProps {
   logScaleHeader?: boolean
   scrollTop: number
   viewportHeight: number
+  onCurveColorChange?: (key: LogCurveColorKey, color: string) => void
+  onCurveStyleChange?: (key: LogCurveColorKey, style: LogCurveLineStyle) => void
+  curveLineStyles?: Partial<Record<LogCurveColorKey, LogCurveLineStyle>>
 }
 
 // Browsers cap each canvas at ~32 767 px (Chrome, Edge) or 16 384 px (Safari).
@@ -103,6 +120,9 @@ export default function TrackCanvas({
   logScaleHeader,
   scrollTop,
   viewportHeight,
+  onCurveColorChange,
+  onCurveStyleChange,
+  curveLineStyles,
 }: TrackCanvasProps) {
   const palette = useChartPalette()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -219,13 +239,21 @@ export default function TrackCanvas({
 
     // 7) reference lines (vertical at curve-value positions)
     for (const ref of referenceLines) {
-      const c = curves[0]
+      const c =
+        (ref.curveLabel
+          ? curves.find((curve) => curve.label === ref.curveLabel)
+          : undefined) ?? curves[0]
       if (!c) continue
       const x = curveValueToX(ref.value, c, width)
       if (x == null) continue
       ctx.strokeStyle = ref.color
       ctx.lineWidth = 1
-      ctx.setLineDash(ref.dashed ? [3, 3] : [])
+      const refStyle: LogCurveLineStyle = ref.lineStyle
+        ? ref.lineStyle
+        : ref.dashed
+          ? 'dashed'
+          : 'solid'
+      ctx.setLineDash(canvasLineDash(refStyle))
       ctx.beginPath()
       ctx.moveTo(x, 0)
       ctx.lineTo(x, canvasH)
@@ -272,6 +300,18 @@ export default function TrackCanvas({
         points.push({ x, y })
       }
 
+      if (curve.renderMode === 'dots') {
+        ctx.fillStyle = curve.color
+        const r = curve.dotRadius ?? 1.25
+        for (const p of points) {
+          if (Number.isNaN(p.x)) continue
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        continue
+      }
+
       // Fill (left or right)
       if ((curve.fillLeft || curve.fillRight) && curve.fillColor) {
         ctx.fillStyle = curve.fillColor
@@ -308,7 +348,9 @@ export default function TrackCanvas({
       // Stroke
       ctx.strokeStyle = curve.color
       ctx.lineWidth = curve.lineWidth || 1
-      if (curve.dashed) ctx.setLineDash([4, 3])
+      const strokeStyle: LogCurveLineStyle =
+        curve.lineStyle ?? (curve.dashed ? 'dashed' : 'solid')
+      ctx.setLineDash(canvasLineDash(strokeStyle))
       ctx.beginPath()
       let drawing = false
       for (const p of points) {
@@ -347,29 +389,79 @@ export default function TrackCanvas({
       className="relative border-r border-border bg-bg"
       id={`track-${id}`}
     >
-      <div className="sticky top-0 z-10 surface-track-stick border-b border-border h-[60px] px-2 py-1 flex flex-col">
-        <div className="flex items-center justify-between">
-          <span className="font-display text-[10px] uppercase tracking-widest text-text-bright">
+      <div className="surface-track-stick relative sticky top-0 z-10 flex h-[60px] shrink-0 flex-col overflow-hidden border-b border-border px-2 py-1">
+        <div className="flex h-[14px] shrink-0 items-center justify-between gap-1">
+          <span className="truncate font-display text-[10px] uppercase tracking-widest text-text-bright">
             {label}
           </span>
           {unit && (
-            <span className="font-mono text-[9px] text-text-dim">{unit}</span>
+            <span className="shrink-0 font-mono text-[9px] text-text-dim">{unit}</span>
           )}
         </div>
-        {/* Legend pills for each curve */}
-        <div className="flex flex-wrap gap-1 mt-1">
-          {curves.map((c) => (
-            <span
-              key={c.label}
-              className="inline-flex items-center gap-1 text-[9px] font-mono text-text-dim"
-            >
+        {/* Legend — single row; fixed header height keeps all columns aligned */}
+        <div className="mt-0.5 flex h-[18px] shrink-0 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+          {curves.map((c) => {
+            if (!c.label.trim() || c.lineWidth === 0) return null
+            return (
               <span
-                className="inline-block h-0.5 w-3"
-                style={{ background: c.color }}
-              />
-              {c.label}
-            </span>
-          ))}
+                key={c.label}
+                className="inline-flex shrink-0 items-center gap-0.5 text-[8px] font-mono leading-none text-text-dim"
+              >
+                {c.colorKey && onCurveColorChange ? (
+                  <>
+                    <input
+                      type="color"
+                      value={toColorInputValue(c.color, c.colorKey)}
+                      title={`${c.label} color`}
+                      className="h-3 w-3 shrink-0 cursor-pointer border-0 bg-transparent p-0"
+                      onChange={(e) =>
+                        onCurveColorChange(c.colorKey!, e.target.value)
+                      }
+                    />
+                    {onCurveStyleChange && (
+                      <select
+                        value={
+                          curveLineStyles?.[c.colorKey] ??
+                          (c.lineStyle ?? (c.dashed ? 'dashed' : 'solid'))
+                        }
+                        title={`${c.label} line style`}
+                        className="max-w-[1.35rem] cursor-pointer border-0 bg-transparent p-0 font-mono text-[7px] text-text-dim"
+                        onChange={(e) =>
+                          onCurveStyleChange(
+                            c.colorKey!,
+                            e.target.value as LogCurveLineStyle,
+                          )
+                        }
+                      >
+                        <option value="solid">─</option>
+                        <option value="dashed">╌</option>
+                        <option value="dotted">···</option>
+                      </select>
+                    )}
+                  </>
+                ) : (
+                  <span
+                    className="inline-block w-3 shrink-0"
+                    style={
+                      (c.lineStyle ?? (c.dashed ? 'dashed' : 'solid')) !==
+                      'solid'
+                        ? {
+                            height: 0,
+                            borderBottom: `2px ${
+                              (c.lineStyle ?? (c.dashed ? 'dashed' : 'solid')) ===
+                              'dotted'
+                                ? 'dotted'
+                                : 'dashed'
+                            } ${c.color}`,
+                          }
+                        : { height: '2px', background: c.color }
+                    }
+                  />
+                )}
+                {c.label}
+              </span>
+            )
+          })}
         </div>
         {/* Scale labels */}
         {scaleLabel && (

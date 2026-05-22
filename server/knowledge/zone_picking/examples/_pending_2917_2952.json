@@ -1,0 +1,20 @@
+{
+  "status": "pending_expert_confirmation",
+  "well_id": null,
+  "depth_units": "confirm_ft_or_m",
+  "play": null,
+  "expert_zones": [
+    {
+      "type": "GAS",
+      "top_ft": null,
+      "bot_ft": null,
+      "top_raw_dictation": 2917,
+      "bot_raw_dictation": 2952,
+      "confidence": "medium",
+      "rationale_draft": "Deep RT only modest vs well average; NPHI-DPHI crossover or near-crossover; high porosity; SP sandstone deflection; low Vsh on GR."
+    }
+  ],
+  "curves_that_mattered": ["NPHI", "DPHI", "GR", "Vsh", "SP", "phi_eff", "RT_deep", "RT_medium", "RT_shallow"],
+  "rejected_logic": "Do not reject solely because deep RT < well mean RT.",
+  "notes": "Fill tops/bots in ft after well is identified; attach curve_snippet_csv when building few-shot prompt."
+}

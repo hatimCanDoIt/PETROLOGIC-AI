@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, extractErrorMessage } from '@/api/client'
-import type { PetroParams, WellDetail, WellStats, WellSummary } from '@/types'
+import type {
+  AnalysisMode,
+  PetroParams,
+  WellDetail,
+  WellStats,
+  WellSummary,
+} from '@/types'
 
 export function useWells() {
   return useQuery({
@@ -45,6 +51,7 @@ export function useUploadWell() {
       a?: number
       m?: number
       n?: number
+      analysis_mode?: AnalysisMode
     }) => {
       const fd = new FormData()
       fd.append('las_file', input.file)
@@ -54,6 +61,7 @@ export function useUploadWell() {
       if (input.a != null) fd.append('a', String(input.a))
       if (input.m != null) fd.append('m', String(input.m))
       if (input.n != null) fd.append('n', String(input.n))
+      if (input.analysis_mode) fd.append('analysis_mode', input.analysis_mode)
       try {
         const { data } = await api.post<WellDetail>('/api/wells/upload', fd, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -87,7 +95,9 @@ export function useDeleteWell() {
 export function useReanalyzeWell(wellId: string | undefined) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (params: Partial<PetroParams>) => {
+    mutationFn: async (
+      params: Partial<PetroParams> & { analysis_mode?: AnalysisMode },
+    ) => {
       if (!wellId) throw new Error('No well id')
       try {
         const { data } = await api.post<WellDetail>(

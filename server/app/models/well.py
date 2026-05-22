@@ -39,6 +39,14 @@ class Well(Base):
     result_json: Mapped[dict] = mapped_column(JSON, default=dict)
     ai_interpretation: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # "deterministic" → numpy engine picks zones, LLM only narrates them.
+    # "llm"           → LLM (Sonnet by default) picks zones directly from the
+    #                   computed curves; per-zone numerical summaries are
+    #                   still recomputed deterministically from those curves.
+    analysis_mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="deterministic", server_default="deterministic"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
@@ -74,5 +82,10 @@ class HcZone(Base):
     producible_pct: Mapped[float] = mapped_column(Float, nullable=False)
     lith_flag: Mapped[str] = mapped_column(String, nullable=False)
     ai_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Free-text explanation supplied by the LLM zone picker (mode="llm");
+    # NULL on deterministic picks.
+    ai_rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 'high' | 'medium' | 'low' — only set when the LLM picked the zone.
+    ai_confidence: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     well: Mapped["Well"] = relationship(back_populates="zones")

@@ -20,10 +20,33 @@ import TrackCanvas, {
 } from './TrackCanvas'
 import { useScrollSync } from './useScrollSync'
 import { formatSampleAtDepth, nearestDepthSampleValue } from '@/utils/curveDepthNearest'
+import {
+  fillFromLineColor,
+  loadLogCurveColors,
+  resolveLogCurveColor,
+  saveLogCurveColors,
+  type LogCurveColorKey,
+} from '@/utils/logCurveColors'
+import {
+  loadLogCurveStyles,
+  resolveLogCurveStyle,
+  saveLogCurveStyles,
+  type LogCurveLineStyle,
+} from '@/utils/logCurveStyles'
+import {
+  discoverResistivityMnemonics,
+  loadRtCurveSelection,
+  mergeRtCurveSelection,
+  RT_COMPARE_COLORS,
+  rtCurveRole,
+  saveRtCurveSelection,
+} from '@/utils/rtCurveSelection'
 
 interface LogViewerProps {
   result: ResultJson
   zones: HcZoneOut[]
+  /** Full LAS curve list — used to locate shallow/micro RT when not in overview. */
+  curvesAvailable?: string[]
   /** When set, ruler + track widths persist in localStorage for this key (e.g. well id). */
   layoutStorageKey?: string
 }
@@ -33,6 +56,8 @@ interface ReferenceLineConfig {
   color: string
   label?: string
   dashed?: boolean
+  lineStyle?: LogCurveLineStyle
+  curveLabel?: string
 }
 
 interface TrackConfig {
@@ -114,6 +139,33 @@ function readingTooltipHtml(
 function cleanArray(arr?: (number | null)[]): number[] {
   if (!arr) return []
   return arr.map((v) => (v == null || !Number.isFinite(v) ? NaN : v))
+}
+
+/** Arithmetic mean with optional backend stat fallback. */
+function meanArithmetic(
+  values: (number | null)[],
+  statsMean?: number,
+): number | null {
+  if (statsMean != null && Number.isFinite(statsMean)) return statsMean
+  const finite = values.filter(
+    (v): v is number => v != null && Number.isFinite(v),
+  )
+  if (finite.length === 0) return null
+  return finite.reduce((sum, v) => sum + v, 0) / finite.length
+}
+
+/** Geometric mean RT (Ω·m) — matches ``petrophysics.mean_RT`` (mean of log₁₀ values). */
+function meanRtOhmm(values: (number | null)[], statsMean?: number): number | null {
+  if (statsMean != null && Number.isFinite(statsMean) && statsMean > 0) {
+    return statsMean
+  }
+  const finite = values.filter(
+    (v): v is number => v != null && Number.isFinite(v) && v > 0,
+  )
+  if (finite.length === 0) return null
+  const logMean =
+    finite.reduce((sum, v) => sum + Math.log10(v), 0) / finite.length
+  return 10 ** logMean
 }
 
 const TRACK_WIDTH_MIN = 100
@@ -212,16 +264,29 @@ function ResizeStrip({
   max: number
   onCommitWidth: (n: number) => void
 }) {
+  const rafRef = useRef(0)
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
     const startX = e.clientX
     const startW = width
+    const latestXRef = { current: e.clientX }
+
+    const flush = () => {
+      rafRef.current = 0
+      onCommitWidth(clampSize(startW + (latestXRef.current - startX), min, max))
+    }
 
     const move = (ev: PointerEvent) => {
-      onCommitWidth(clampSize(startW + (ev.clientX - startX), min, max))
+      latestXRef.current = ev.clientX
+      if (rafRef.current) return
+      rafRef.current = requestAnimationFrame(flush)
     }
     const up = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      rafRef.current = 0
+      onCommitWidth(clampSize(startW + (latestXRef.current - startX), min, max))
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
@@ -266,7 +331,7 @@ function ResizeStrip({
 }
 
 const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer(
-  { result, zones, layoutStorageKey },
+  { result, zones, curvesAvailable, layoutStorageKey },
   ref,
 ) {
   const overview = result.overview
@@ -275,13 +340,75 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
   const depthMin = validDepths.length ? Math.min(...validDepths) : 0
   const depthMax = validDepths.length ? Math.max(...validDepths) : 1
 
+  const layoutHostRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [viewportHeight, setViewportHeight] = useState(600)
   const [crosshairContentY, setCrosshairContentY] = useState<number | null>(null)
   const [depthRulerWidth, setDepthRulerWidth] = useState(80)
   const [trackWidths, setTrackWidths] = useState<Record<string, number>>({})
+  const [curveColors, setCurveColors] = useState(loadLogCurveColors)
+  const [curveStyles, setCurveStyles] = useState(loadLogCurveStyles)
+
+  const primaryRtMnemonic = useMemo(() => {
+    const fromMap = result.curve_map?.RT
+    if (fromMap) return fromMap
+    const fromVal = result.validation?.rt_mnemonic
+    if (typeof fromVal === 'string' && fromVal) return fromVal
+    return 'RT'
+  }, [result.curve_map, result.validation])
+
+  const availableRtMnemonics = useMemo(() => {
+    const fromVal = result.validation?.rt_mnemonics
+    const list = Array.isArray(fromVal) ? (fromVal as string[]) : []
+    const fromOv = Object.keys(result.overview.rt_curves ?? {})
+    const fromRaw = Object.keys(result.raw_arrays ?? {}).filter((k) => k !== 'depth')
+    return discoverResistivityMnemonics(
+      [primaryRtMnemonic],
+      list,
+      fromOv,
+      fromRaw,
+      curvesAvailable,
+    )
+  }, [
+    result.validation,
+    result.overview.rt_curves,
+    result.raw_arrays,
+    curvesAvailable,
+    primaryRtMnemonic,
+  ])
+
+  const [selectedRtMnemonics, setSelectedRtMnemonics] = useState<string[]>([
+    primaryRtMnemonic,
+  ])
+
+  useEffect(() => {
+    const saved = loadRtCurveSelection(layoutStorageKey)
+    setSelectedRtMnemonics(
+      mergeRtCurveSelection(availableRtMnemonics, primaryRtMnemonic, saved),
+    )
+  }, [layoutStorageKey, primaryRtMnemonic, availableRtMnemonics.join('|')])
+
+  useEffect(() => {
+    saveRtCurveSelection(layoutStorageKey, selectedRtMnemonics)
+  }, [layoutStorageKey, selectedRtMnemonics])
 
   const resolvedTrackWidth = (id: string) => trackWidths[id] ?? defaultTrackWidth(id)
+
+  const handleCurveColorChange = (key: LogCurveColorKey, color: string) => {
+    setCurveColors((prev) => {
+      const next = { ...prev, [key]: color }
+      saveLogCurveColors(next)
+      return next
+    })
+  }
+
+  const handleCurveStyleChange = (key: LogCurveColorKey, style: LogCurveLineStyle) => {
+    setCurveStyles((prev) => {
+      const next = { ...prev, [key]: style }
+      saveLogCurveStyles(next)
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!layoutStorageKey) {
@@ -346,12 +473,19 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
   useImperativeHandle(
     ref,
     () => ({
-      scrollToDepth: sync.scrollToDepth,
+      scrollToDepth: (ft: number) => {
+        const el = containerRef.current
+        if (!el) return
+        const pxPerFt = PX_PER_FT * sync.zoomFactor
+        const contentY = TRACK_HEADER_PX + (ft - depthMin) * pxPerFt
+        const targetScroll = contentY - el.clientHeight / 2
+        el.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' })
+      },
       setZoom: sync.setZoom,
       zoomIn: () => sync.setZoom(sync.zoomFactor * 1.25),
       zoomOut: () => sync.setZoom(sync.zoomFactor / 1.25),
     }),
-    [sync],
+    [depthMin, sync.setZoom, sync.zoomFactor],
   )
 
   // Auto-scroll to the first HC zone on first load
@@ -360,23 +494,60 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     if (didAutoScrollRef.current) return
     if (zones.length > 0) {
       didAutoScrollRef.current = true
-      // run after the canvas has laid out
       requestAnimationFrame(() => {
-        sync.scrollToDepth(zones[0].top_ft)
+        const z = zones[0]
+        const el = containerRef.current
+        if (!el) return
+        const mid = (z.top_ft + z.bot_ft) / 2
+        const pxPerFt = PX_PER_FT * sync.zoomFactor
+        const contentY = TRACK_HEADER_PX + (mid - depthMin) * pxPerFt
+        el.scrollTo({ top: Math.max(0, contentY - el.clientHeight / 2), behavior: 'smooth' })
       })
     }
-  }, [zones, sync])
+  }, [zones, depthMin, sync.zoomFactor])
 
   useEffect(() => () => hideReadingTooltip(), [])
 
   // ---- track configs ------------------------------------------------------
   const tracks = useMemo(() => {
+    const c = (key: LogCurveColorKey) => resolveLogCurveColor(key, curveColors, palette)
+    const ls = (key: LogCurveColorKey) => resolveLogCurveStyle(key, curveStyles)
+
+    const grColor = c('gr')
+    const vshColor = c('vsh')
+    const spColor = c('sp')
+    const rtColor = c('rt')
+    const nphiColor = c('nphi')
+    const dphiColor = c('dphi')
+    const phieColor = c('phie')
+    const shcColor = c('shc')
+    const swColor = c('sw')
+    const bvwColor = c('bvw')
+    const pefColor = c('pef')
+
     const grValues = overview.GR as (number | null)[]
     const vshValues = overview.Vsh as (number | null)[]
     const nphiValues = overview.NPHI as (number | null)[]
     const dphiValues = overview.DPHI as (number | null)[]
     const phieValues = overview.phi_eff as (number | null)[]
     const rtValues = overview.RT as (number | null)[]
+    const rtExtra = overview.rt_curves ?? {}
+    const rawArrays = result.raw_arrays
+
+    const rtValuesForMnemonic = (mnem: string): (number | null)[] | null => {
+      if (mnem === primaryRtMnemonic) return rtValues
+      const fromOv = rtExtra[mnem]
+      if (fromOv?.length) return fromOv
+      const rawDepth = rawArrays?.depth
+      const rawVals = rawArrays?.[mnem]
+      if (rawDepth?.length && rawVals?.length) {
+        return (overview.depth as (number | null)[]).map((d) =>
+          d == null ? null : nearestDepthSampleValue(rawDepth as number[], rawVals, d),
+        )
+      }
+      return null
+    }
+
     const shcValues = overview.Shc as (number | null)[]
     const swValues = overview.Sw as (number | null)[]
     const bvwValues = overview.BVW as (number | null)[]
@@ -384,10 +555,22 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     const spValues = (overview.SP as (number | null)[] | undefined) ?? null
     const lithValues = overview.lith_flag as number[]
 
-    const grClean = result.stats?.GR_clean ?? 30
-    const grShale = result.stats?.GR_shale ?? 120
-    const spBaseline = result.stats?.sp_shale_baseline
-    const spSandLine = result.stats?.sp_sand_line
+    const meanRt = meanRtOhmm(rtValues, result.stats?.mean_RT)
+    const meanGr = meanArithmetic(grValues, result.stats?.mean_GR)
+    const meanPhie = meanArithmetic(phieValues, result.stats?.mean_phi_eff)
+
+    // Sand = low SP (left); shale = high SP (right). Use min/max so labels
+    // always match track position even if stored stats were inverted.
+    const spShaleRaw = result.stats?.sp_shale_baseline
+    const spSandRaw = result.stats?.sp_sand_line
+    const spSandLine =
+      spShaleRaw != null && spSandRaw != null
+        ? Math.min(spShaleRaw, spSandRaw)
+        : spSandRaw ?? spShaleRaw
+    const spBaseline =
+      spShaleRaw != null && spSandRaw != null
+        ? Math.max(spShaleRaw, spSandRaw)
+        : spShaleRaw ?? spSandRaw
     const hasSp = !!spValues && spValues.some((v) => v != null && Number.isFinite(v))
 
     // Auto-scale SP track to the actual data so the curve always fills the
@@ -419,7 +602,9 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
             {
               depths: depths as number[],
               values: spValues as (number | null)[],
-              color: palette.sp,
+              color: spColor,
+              colorKey: 'sp',
+              lineStyle: ls('sp'),
               lineWidth: 1.2,
               xMin: spMin,
               xMax: spMax,
@@ -427,17 +612,17 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
             },
           ] as CurveConfig[],
           referenceLines: [
+            spSandLine != null && {
+              value: spSandLine,
+              color: spColor,
+              dashed: true,
+              label: 'sand',
+            },
             spBaseline != null && {
               value: spBaseline,
               color: 'rgba(74,102,128,0.6)',
               dashed: true,
               label: 'shale',
-            },
-            spSandLine != null && {
-              value: spSandLine,
-              color: palette.sp,
-              dashed: true,
-              label: 'sand',
             },
           ].filter(Boolean) as ReferenceLineConfig[],
         }
@@ -455,100 +640,122 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
           {
             depths: depths as number[],
             values: vshValues,
-            color: 'rgba(74,102,128,0.55)',
+            color: vshColor,
+            colorKey: 'vsh',
+            lineStyle: ls('vsh'),
             lineWidth: 1,
             xMin: 0,
             xMax: 1,
-            fillRight: true,
-            fillColor: palette.vsh,
+            fillLeft: true,
+            fillColor: fillFromLineColor(vshColor, 0.35),
             label: 'Vsh',
           },
           {
             depths: depths as number[],
             values: grValues,
-            color: palette.gr,
+            color: grColor,
+            colorKey: 'gr',
+            lineStyle: ls('gr'),
             lineWidth: 1.2,
             xMin: 0,
             xMax: 150,
             fillLeft: true,
-            fillColor: palette.grFill,
+            fillColor: fillFromLineColor(grColor, 0.12),
             label: 'GR',
           },
         ] as CurveConfig[],
-        referenceLines: [
-          { value: grClean, color: palette.accent, label: `clean ${grClean.toFixed(0)}`, dashed: true },
-          { value: grShale, color: palette.oil, label: `shale ${grShale.toFixed(0)}`, dashed: true },
-        ],
+        referenceLines:
+          meanGr != null
+            ? [
+                {
+                  value: meanGr,
+                  color: 'rgba(148, 163, 184, 0.9)',
+                  lineStyle: 'dotted',
+                  label: `avg ${meanGr.toFixed(1)}`,
+                  curveLabel: 'GR',
+                },
+              ]
+            : [],
       },
-      // Track 2 — Resistivity (log)
+      // Track 2 — Resistivity (log); multiple RT mnemonics on one track
       {
         id: 'rt',
-        sidebarHint: 'Deep resistivity',
+        sidebarHint: 'Deep Rt, shallow Rxo, micro-resistivity',
         label: 'Resistivity',
         unit: 'Ω·m',
         scaleLabel: ['0.1', '1000'] as [string, string],
         scaleTicks: [0.1, 1, 10, 100, 1000],
         logScaleHeader: true,
-        curves: [
-          {
-            depths: depths as number[],
-            values: rtValues,
-            color: palette.rt,
-            lineWidth: 1.4,
-            xMin: 0.1,
-            xMax: 1000,
-            logScale: true,
-            fillRight: true,
-            fillColor: palette.rtFill,
-            label: 'RT',
-          },
-        ] as CurveConfig[],
+        curves: (() => {
+          let overlayIx = 0
+          return selectedRtMnemonics
+            .map((mnem) => {
+            const values = rtValuesForMnemonic(mnem)
+            if (!values) return null
+            const isPrimary = mnem === primaryRtMnemonic
+            const color = isPrimary
+              ? rtColor
+              : RT_COMPARE_COLORS[overlayIx++ % RT_COMPARE_COLORS.length]
+            return {
+              depths: depths as number[],
+              values,
+              color,
+              colorKey: isPrimary ? ('rt' as const) : undefined,
+              renderMode: 'dots' as const,
+              dotRadius: isPrimary ? 1.35 : 1.15,
+              xMin: 0.1,
+              xMax: 1000,
+              logScale: true,
+              label:
+                rtCurveRole(mnem) === 'other'
+                  ? mnem
+                  : `${mnem} · ${rtCurveRole(mnem)}`,
+            }
+          })
+            .filter(Boolean) as CurveConfig[]
+        })(),
+        referenceLines:
+          meanRt != null
+            ? [
+                {
+                  value: meanRt,
+                  color: 'rgba(148, 163, 184, 0.9)',
+                  lineStyle: 'dotted',
+                  label: `avg ${meanRt < 10 ? meanRt.toFixed(2) : meanRt.toFixed(1)}`,
+                },
+              ]
+            : [],
       },
-      // Track 3 — Neutron / Density porosity + effective porosity
+      // Track 3 — Neutron / density porosity (N–D crossover)
       {
         id: 'nphi-dphi',
-        sidebarHint: 'Neutron, density, effective φ',
-        label: 'NPHI / DPHI / PHIE',
+        sidebarHint: 'Neutron vs density porosity, gas crossover',
+        label: 'NPHI / DPHI',
         unit: 'v/v',
-        scaleLabel: ['0.6', '0.0'] as [string, string],
+        scaleLabel: ['0.0', '0.6'] as [string, string],
         curves: [
-          // PHIE drawn first so its cyan fill sits *under* the NPHI/DPHI lines.
-          {
-            depths: depths as number[],
-            values: phieValues,
-            color: palette.phie,
-            lineWidth: 1.4,
-            xMin: 0.0,
-            xMax: 0.6,
-            reversed: true,
-            fillLeft: false,
-            fillRight: true,
-            fillColor: palette.phieFill,
-            label: 'PHIE',
-          },
           {
             depths: depths as number[],
             values: nphiValues,
-            color: palette.nphi,
-            lineWidth: 1.2,
+            color: nphiColor,
+            colorKey: 'nphi',
+            lineStyle: ls('nphi'),
+            lineWidth: 1.6,
             xMin: 0.0,
             xMax: 0.6,
-            reversed: true,
             label: 'NPHI',
           },
           {
             depths: depths as number[],
             values: dphiValues,
-            color: palette.dphi,
-            lineWidth: 1.2,
+            color: dphiColor,
+            colorKey: 'dphi',
+            lineStyle: ls('dphi'),
+            lineWidth: 1.6,
             xMin: 0.0,
             xMax: 0.6,
-            reversed: true,
-            dashed: true,
             label: 'DPHI',
           },
-          // Crossover shading: a synthetic curve that is min(NPHI, DPHI) only where
-          // DPHI > NPHI; otherwise NaN. We use the gas-red fill to colour the gap.
           {
             depths: depths as number[],
             values: nphiValues.map((nv, i) => {
@@ -561,14 +768,48 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
             lineWidth: 0,
             xMin: 0.0,
             xMax: 0.6,
-            reversed: true,
-            fillLeft: false,
-            fillRight: false,
+            fillLeft: true,
+            fillColor: 'rgba(255, 61, 90, 0.14)',
             label: '',
           },
         ] as CurveConfig[],
       },
-      // Track 4 — Saturation
+      // Track 4 — Effective porosity (separate column)
+      {
+        id: 'phie',
+        sidebarHint: 'Effective porosity (PHIE)',
+        label: 'PHIE',
+        unit: 'v/v',
+        scaleLabel: ['0.0', '0.6'] as [string, string],
+        curves: [
+          {
+            depths: depths as number[],
+            values: phieValues,
+            color: phieColor,
+            colorKey: 'phie',
+            lineStyle: ls('phie'),
+            lineWidth: 1.6,
+            xMin: 0.0,
+            xMax: 0.6,
+            fillLeft: true,
+            fillColor: fillFromLineColor(phieColor, 0.12),
+            label: 'PHIE',
+          },
+        ] as CurveConfig[],
+        referenceLines:
+          meanPhie != null
+            ? [
+                {
+                  value: meanPhie,
+                  color: 'rgba(148, 163, 184, 0.9)',
+                  lineStyle: 'dotted',
+                  label: `avg ${meanPhie.toFixed(3)}`,
+                  curveLabel: 'PHIE',
+                },
+              ]
+            : [],
+      },
+      // Track 5 — Saturation
       {
         id: 'sat',
         sidebarHint: 'Shc, Sw, BVW',
@@ -579,46 +820,51 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
           {
             depths: depths as number[],
             values: shcValues,
-            color: palette.shc,
+            color: shcColor,
+            colorKey: 'shc',
+            lineStyle: ls('shc'),
             lineWidth: 1.2,
             xMin: 0,
             xMax: 1,
             fillRight: true,
-            fillColor: palette.shcFill,
+            fillColor: fillFromLineColor(shcColor, 0.18),
             label: 'Shc',
           },
           {
             depths: depths as number[],
             values: swValues,
-            color: palette.sw,
+            color: swColor,
+            colorKey: 'sw',
+            lineStyle: ls('sw'),
             lineWidth: 1.2,
             xMin: 0,
             xMax: 1,
             fillLeft: true,
-            fillColor: palette.swFill,
+            fillColor: fillFromLineColor(swColor, 0.18),
             label: 'Sw',
           },
           {
             depths: depths as number[],
             values: bvwValues,
-            color: palette.bvw,
+            color: bvwColor,
+            colorKey: 'bvw',
+            lineStyle: ls('bvw'),
             lineWidth: 1.0,
             xMin: 0,
             xMax: 0.2,
-            dashed: true,
             label: 'BVW',
           },
         ] as CurveConfig[],
         referenceLines: [
           {
-            value: 0.6,
+            value: 0.5,
             color: 'rgba(232,244,255,0.4)',
             dashed: true,
-            label: 'Sw=0.60',
+            label: 'Sw=0.50',
           },
         ],
       },
-      // Track 5 — PEF / Lithology
+      // Track 6 — PEF / Lithology
       {
         id: 'pef',
         sidebarHint: 'PEF + lithology',
@@ -634,7 +880,9 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
           {
             depths: depths as number[],
             values: pefValues,
-            color: palette.pef,
+            color: pefColor,
+            colorKey: 'pef',
+            lineStyle: ls('pef'),
             lineWidth: 1.2,
             xMin: 0,
             xMax: 8,
@@ -653,7 +901,17 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
       base.splice(1, 0, spTrack)
     }
     return base
-  }, [overview, depths, result.stats, palette])
+  }, [
+    overview,
+    depths,
+    result.stats,
+    result.raw_arrays,
+    palette,
+    curveColors,
+    curveStyles,
+    primaryRtMnemonic,
+    selectedRtMnemonics,
+  ])
 
   const [trackVisible, setTrackVisible] = useState<Record<string, boolean>>({})
 
@@ -681,17 +939,22 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     [visibleTracks],
   )
 
-  // Keep total track width matched to the log viewport so resizing the Report RHS (or the
-  // window) scales every visible track by the same delta instead of overflowing under the panel.
+  // Fit tracks to the log *column* width (outer host). Do not observe the scroll viewport:
+  // horizontal scrollbars appearing during column drag change clientWidth and re-trigger a
+  // full redistribute, which fights the drag and makes the RHS look "detached" / janky.
   useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+    const host = layoutHostRef.current
+    if (!host) return
     if (!visibleTrackIds) return
 
     const ids = visibleTrackIds.split(',')
+    let raf = 0
 
     const run = () => {
-      const viewportW = Math.floor(el.clientWidth)
+      const scrollEl = containerRef.current
+      const viewportW = Math.floor(
+        scrollEl && scrollEl.isConnected ? scrollEl.clientWidth : host.clientWidth,
+      )
       if (!Number.isFinite(viewportW) || viewportW <= 0) return
 
       const n = ids.length
@@ -706,10 +969,21 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
       })
     }
 
-    const ro = new ResizeObserver(() => run())
-    ro.observe(el)
-    run()
-    return () => ro.disconnect()
+    const schedule = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        run()
+      })
+    }
+
+    const ro = new ResizeObserver(() => schedule())
+    ro.observe(host)
+    schedule()
+    return () => {
+      ro.disconnect()
+      if (raf) cancelAnimationFrame(raf)
+    }
   }, [visibleTrackIds, depthRulerWidth])
 
   const toggleTrackId = (id: string) => {
@@ -718,6 +992,20 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
       [id]: !(prev[id] ?? true),
     }))
   }
+
+  const addRtMnemonic = (mnem: string) => {
+    if (!mnem || selectedRtMnemonics.includes(mnem)) return
+    setSelectedRtMnemonics((prev) => [...prev, mnem])
+  }
+
+  const removeRtMnemonic = (mnem: string) => {
+    if (selectedRtMnemonics.length <= 1) return
+    setSelectedRtMnemonics((prev) => prev.filter((m) => m !== mnem))
+  }
+
+  const rtAddOptions = availableRtMnemonics.filter(
+    (m) => !selectedRtMnemonics.includes(m),
+  )
 
   const zonesAsOverlays = useMemo(
     () =>
@@ -792,7 +1080,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
   }
 
   return (
-    <div className="relative h-full flex flex-col min-h-0 min-w-0">
+    <div ref={layoutHostRef} className="relative h-full flex flex-col min-h-0 min-w-0">
       <div className="flex min-h-10 shrink-0 items-center gap-x-4 border-b border-border surface-header-bar px-[clamp(0.5rem,4vw,1rem)]">
         <div className="flex min-w-0 shrink-0 items-center gap-x-4">
           <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-text-dim">
@@ -850,6 +1138,53 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               No tracks selected
             </span>
           )}
+          {trackVisible.rt !== false && availableRtMnemonics.length > 0 && (
+            <div
+              className="flex shrink-0 items-center gap-1.5 border-l border-border-muted pl-3"
+              title="Compare multiple resistivity curves on the RT track"
+            >
+              <span className="font-mono text-[9px] uppercase tracking-wider text-text-dim">
+                RT
+              </span>
+              {selectedRtMnemonics.map((mnem) => (
+                <span
+                  key={mnem}
+                  className="inline-flex items-center gap-0.5 rounded border border-border-muted bg-bg-elevated px-1.5 py-0.5 font-mono text-[9px] text-text-bright"
+                >
+                  {mnem}
+                  {selectedRtMnemonics.length > 1 && (
+                    <button
+                      type="button"
+                      className="leading-none text-text-dim hover:text-oil"
+                      title={`Remove ${mnem}`}
+                      onClick={() => removeRtMnemonic(mnem)}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+              {rtAddOptions.length > 0 && (
+                <select
+                  className="max-w-[5.5rem] cursor-pointer rounded border border-border-muted bg-bg-elevated px-1 py-0.5 font-mono text-[9px] text-text-bright"
+                  value=""
+                  title="Add resistivity curve"
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v) addRtMnemonic(v)
+                    e.target.value = ''
+                  }}
+                >
+                  <option value="">+ add</option>
+                  {rtAddOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -861,7 +1196,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
         onScroll={handleScrollerScroll}
         onMouseMove={handleCrosshairMove}
         onMouseLeave={handleCrosshairLeave}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-auto"
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-auto [scrollbar-gutter:stable]"
       >
         <div
           className="relative isolate flex shrink-0"
@@ -920,6 +1255,9 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
                 leftColorBar={t.leftColorBar}
                 scrollTop={sync.scrollTop}
                 viewportHeight={viewportHeight}
+                onCurveColorChange={handleCurveColorChange}
+                onCurveStyleChange={handleCurveStyleChange}
+                curveLineStyles={curveStyles}
               />
               <ResizeStrip
                 ariaLabel={`Resize ${t.label} track width`}

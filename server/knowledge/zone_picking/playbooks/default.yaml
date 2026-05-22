@@ -1,0 +1,69 @@
+# Curated zone-picking rules (pass 1). Loaded into LLM prompt / validation later.
+version: 1
+
+depth_context:
+  expect_pay_min_ft: 10000
+  note: >
+    Current portfolio targets deep reservoirs; shallow pay above ~10k ft is
+    uncommon — treat shallow anomalies with extra scrutiny unless log metadata
+    indicates otherwise.
+
+rw_and_sw:
+  prefer_auto_rw_from_log: true
+  method: >
+    Estimate Rw from minimum apparent water resistivity (Rwa) in clean,
+    porous, water-wet intervals; user should not need to type Rw for routine runs.
+  archie:
+    tune_a_m_n_when_play_known: true
+    note: a/m/n affect Sw; Rw auto-estimate uses the same m (and a) as Archie.
+
+pay_criteria:
+  primary_indicators:
+    - neutron_porosity_nphi
+    - density_porosity_dphi
+    - nphi_dphi_crossover_or_near_crossover
+    - effective_porosity_phi_eff
+    - vsh_from_gr
+    - sp_sandstone_deflection
+  secondary_indicators:
+    - deep_resistivity_rt
+    - multi_rt_invasion_pattern
+    - archie_sw
+  resistivity:
+    require_deep_rt_alone: false
+    compare_rt_curves: true
+    note: >
+      Deep RT can be depressed by invasion while NPHI/DPHI still show HC;
+      do not reject pay on RT alone when porosity logs and SP/GR agree.
+
+porosity_hc_signatures:
+  gas_crossover:
+    dphi_minus_nphi_min: 0.03
+    near_crossover:
+      enabled: true
+      dphi_minus_nphi_min: 0.015
+      note: >
+        Treat near-crossover (e.g. 0.015–0.03 v/v) as possible HC when GR/SP/
+        phi_eff support pay even if RT is only moderately elevated.
+  oil:
+    treat_as_oil_when: no_clear_gas_crossover
+
+cap_rock:
+  required: true
+  description: >
+    Pay interval must have a competent seal (cap rock) above — high GR / low
+    porosity / tight lithology — otherwise HC is not trapped and pay call is
+    invalid.
+  check_window_ft_above_zone_top: 50
+  heuristic:
+    - cap_present_if_mean_vsh_above_zone > 0.5 OR mean_phi_eff_above_zone < 0.06
+    - flag_low_confidence_if_no_clear_cap
+
+zone_geometry:
+  min_zone_ft: 3
+  bridge_gap_ft: 1.5
+
+examples_pending:
+  - interval: "2917-2952"
+    well: null
+    status: needs_well_name_and_depth_units

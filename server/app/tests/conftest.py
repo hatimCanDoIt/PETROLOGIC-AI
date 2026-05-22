@@ -51,7 +51,15 @@ def client():
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    asyncio.get_event_loop().run_until_complete(_init())
+    # Use a fresh, dedicated event loop for the synchronous setup phase so
+    # that prior tests in this session that may have closed the global loop
+    # (e.g. via asyncio.run) don't break this fixture under Python 3.12,
+    # where asyncio.get_event_loop() is no longer auto-creating.
+    setup_loop = asyncio.new_event_loop()
+    try:
+        setup_loop.run_until_complete(_init())
+    finally:
+        setup_loop.close()
 
     with TestClient(app) as c:
         yield c

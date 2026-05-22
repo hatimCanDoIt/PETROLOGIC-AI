@@ -6,8 +6,11 @@ import numpy as np
 import pytest
 
 from app.core.las_parser import (
+    CURVE_ALIASES,
     LASParseError,
+    _find_all_mnemonics,
     auto_select_curves,
+    find_resistivity_mnemonics,
     parse_las,
     validate_curves,
 )
@@ -87,3 +90,15 @@ def test_auto_select_curves(synthetic_las_bytes):
 def test_empty_file_raises():
     with pytest.raises(LASParseError):
         parse_las(b"")
+
+
+def test_find_all_resistivity_mnemonics():
+    cols = ["DEPT", "GR", "AT90", "AT30", "ILD", "NPHI"]
+    found = _find_all_mnemonics(cols, CURVE_ALIASES["RT"])
+    assert found == ["AT90", "ILD", "AT30"]
+
+
+def test_find_resistivity_includes_shallow_and_micro():
+    cols = ["DEPT", "AT90", "AT10", "RXO8", "HMIN", "GR"]
+    found = find_resistivity_mnemonics(cols)
+    assert found == ["AT90", "AT10", "RXO8", "HMIN"]

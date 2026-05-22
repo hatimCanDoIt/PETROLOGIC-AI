@@ -40,7 +40,13 @@ class Settings(BaseSettings):
 
     # Anthropic
     ANTHROPIC_API_KEY: Optional[str] = None
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    # Default interpreter model (runs on every analysis to narrate results).
+    # Sonnet 4.6: same list price as deprecated Sonnet 4 ($3/$15 per MTok) but
+    # current, non-deprecated, and stronger — see Anthropic model pricing docs.
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    # Zone picker: same default; override via ANTHROPIC_ZONE_PICKER_MODEL if you
+    # want a different model for pay-zone detection only.
+    ANTHROPIC_ZONE_PICKER_MODEL: str = "claude-sonnet-4-6"
 
     # Frontend / upload limits
     FRONTEND_URL: str = "http://localhost:5173"

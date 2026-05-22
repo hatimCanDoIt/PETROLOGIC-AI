@@ -9,8 +9,13 @@ export const CURVE_PALETTE_BASE = {
   grFill: 'rgba(57,255,138,0.12)',
   rt: 'rgba(255,107,53,1.0)',
   rtFill: 'rgba(255,107,53,0.08)',
-  nphi: '#0ea5e9',
-  dphi: '#fbbf24',
+  /** Neutron — green (distinct from PHIE / DPHI on the porosity track). */
+  nphi: '#16a34a',
+  /** Density-derived porosity — orange. */
+  dphi: '#ea580c',
+  /** Effective porosity — purple (was same cyan as NPHI). */
+  phie: '#9333ea',
+  phieFill: 'rgba(147, 51, 234, 0.10)',
   shc: 'rgba(57,255,138,0.9)',
   shcFill: 'rgba(57,255,138,0.18)',
   sw: 'rgba(255,80,80,0.9)',
@@ -43,8 +48,6 @@ const LIGHT_SEM = {
   textBright: '#09090b',
   trackGrid: 'rgba(113, 113, 122, 0.18)',
   vsh: 'rgba(100,116,132,0.42)',
-  phie: 'rgba(14,165,233,0.92)',
-  phieFill: 'rgba(14,165,233,0.12)',
   lithUncertain: '#7a8490',
 } as const
 
@@ -61,8 +64,6 @@ const DARK_SEM = {
   textBright: '#fafafa',
   trackGrid: 'rgba(130, 140, 166, 0.28)',
   vsh: 'rgba(148,164,182,0.5)',
-  phie: 'rgba(56,189,248,0.95)',
-  phieFill: 'rgba(56,189,248,0.12)',
   lithUncertain: '#94a3b8',
 } as const
 

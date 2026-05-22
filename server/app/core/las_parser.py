@@ -26,34 +26,76 @@ class LASParseError(ValueError):
     """Raised when a LAS file cannot be parsed or fails validation."""
 
 
+# Deep resistivity for Archie / pay — deepest reading first.
+RT_DEEP_ALIASES: list[str] = [
+    "AT90",
+    "AF90",
+    "AO90",
+    "AHT90",
+    "AT60",
+    "AF60",
+    "AO60",
+    "ILD",
+    "LLD",
+    "RT",
+    "RILD",
+    "RLLD",
+    "RD",
+    "M2R9",
+    "AORT",
+]
+
+# Medium / shallow flushed-zone resistivity (diagnostic overlays).
+RT_SHALLOW_ALIASES: list[str] = [
+    "AT30",
+    "AF30",
+    "AO30",
+    "AT20",
+    "AF20",
+    "AO20",
+    "AT10",
+    "AF10",
+    "AO10",
+    "RXO",
+    "AORX",
+    "RXOZ",
+    "ILS",
+    "RILS",
+    "M2R1",
+    "SFL",
+    "RLLS",
+]
+
+# Micro / mud-cake resistivity (invasion QC).
+RT_MICRO_ALIASES: list[str] = [
+    "RXO8",
+    "HMIN",
+    "HMNO",
+    "MSFL",
+    "BMIN",
+    "BMNO",
+]
+
+# All resistivity mnemonics for log-viewer overlays (priority order).
+RESISTIVITY_ALIASES: list[str] = (
+    RT_DEEP_ALIASES + RT_SHALLOW_ALIASES + RT_MICRO_ALIASES
+)
+
 # Mnemonic aliases — first match wins per family
 CURVE_ALIASES: dict[str, list[str]] = {
     "GR": ["GR", "ECGR", "CGR", "HGR", "GRD", "GRGC", "SGR"],
-    # Array induction / deep resistivity (vendor-specific order:
-    # prefer mid-array AF30 / AT30 before very shallow A10/A20, then deep 90 / ILD).
-    "RT": [
-        "AF30",
+    # Deep resistivity only — shallow curves must not drive Archie Sw.
+    "RT": RT_DEEP_ALIASES
+    + [
         "AT30",
+        "AF30",
         "AO30",
-        "AF60",
-        "AT60",
-        "AO60",
-        "AF90",
-        "AT90",
-        "AO90",
-        "AHT90",
-        "AF10",
-        "AT10",
-        "AO10",
-        "AF20",
         "AT20",
+        "AF20",
         "AO20",
-        "ILD",
-        "LLD",
-        "RT",
-        "RILD",
-        "RLLD",
-        "RD",
+        "AT10",
+        "AF10",
+        "AO10",
     ],
     "NPHI": [
         "NPHI",
@@ -65,6 +107,10 @@ CURVE_ALIASES: dict[str, list[str]] = {
         "PHIN",
     ],
     "RHOZ": ["RHOZ", "RHOB", "DEN", "ZDEN", "DENS", "RHO", "RHOM"],
+    # Vendor density porosity — prefer over in-house RHOZ-derived DPHI when present.
+    "DPHI_INPUT": ["DPHZ", "DPHI", "DPOR", "PHID", "PHID_M"],
+    # Apparent water resistivity from vendor petrophysics (log-method Rw).
+    "RWA": ["RWA", "RWA_HILT", "RWA8", "RWAP"],
     "PEF": ["PEFZ", "PEF", "PE", "PDPE", "PE8"],
     "SP": ["SP", "ASFI", "SPONT", "SPR"],
     "CALI": ["HCAL", "CALI", "DCAL", "CAL", "CALR", "CALS"],
@@ -269,16 +315,33 @@ def parse_las(file_bytes: bytes) -> LASData:
 
 def _find_mnemonic(columns: list[str], aliases: list[str]) -> Optional[str]:
     """Return the first column matching any of ``aliases`` (case-insensitive)."""
+    found = _find_all_mnemonics(columns, aliases)
+    return found[0] if found else None
+
+
+def find_resistivity_mnemonics(columns: list[str]) -> list[str]:
+    """Return every resistivity mnemonic present, deep → shallow → micro."""
+    return _find_all_mnemonics(columns, RESISTIVITY_ALIASES)
+
+
+def _find_all_mnemonics(columns: list[str], aliases: list[str]) -> list[str]:
+    """Return every column matching ``aliases``, in alias priority order."""
     upper_map = {str(c).upper(): c for c in columns}
+    out: list[str] = []
+    seen: set[str] = set()
     for alias in aliases:
-        if alias.upper() in upper_map:
-            return upper_map[alias.upper()]
-    # try prefix match (some vendors append zones, e.g. GR_1)
-    for alias in aliases:
+        key = alias.upper()
+        if key in upper_map:
+            orig = upper_map[key]
+            if orig not in seen:
+                out.append(orig)
+                seen.add(orig)
+            continue
         for upper, original in upper_map.items():
-            if upper.startswith(alias.upper()):
-                return original
-    return None
+            if upper.startswith(key) and original not in seen:
+                out.append(original)
+                seen.add(original)
+    return out
 
 
 def validate_curves(las_data: LASData) -> dict:
@@ -287,6 +350,11 @@ def validate_curves(las_data: LASData) -> dict:
 
     gr = _find_mnemonic(cols, CURVE_ALIASES["GR"])
     rt = _find_mnemonic(cols, CURVE_ALIASES["RT"])
+    rt_all = find_resistivity_mnemonics(cols)
+    rt_sh = _find_mnemonic(cols, RT_SHALLOW_ALIASES)
+    rt_mi = _find_mnemonic(cols, RT_MICRO_ALIASES)
+    rwa = _find_mnemonic(cols, CURVE_ALIASES["RWA"])
+    dphi_in = _find_mnemonic(cols, CURVE_ALIASES["DPHI_INPUT"])
     nphi = _find_mnemonic(cols, CURVE_ALIASES["NPHI"])
     rhoz = _find_mnemonic(cols, CURVE_ALIASES["RHOZ"])
     pef = _find_mnemonic(cols, CURVE_ALIASES["PEF"])
@@ -333,6 +401,15 @@ def validate_curves(las_data: LASData) -> dict:
         warnings.append("No deep resistivity — saturation driven by processed Sw curve.")
     if gas_flag is not None:
         warnings.append(f"Optional gas indicator curve present: {gas_flag}.")
+    if rwa is not None:
+        warnings.append(
+            f"Apparent water resistivity curve {rwa} present — "
+            "used for log-method Rw when auto-estimating."
+        )
+    if dphi_in is not None:
+        warnings.append(
+            f"Using vendor density porosity {dphi_in} where present."
+        )
 
     return {
         "has_gr": gr is not None,
@@ -345,8 +422,15 @@ def validate_curves(las_data: LASData) -> dict:
         "has_phi_input": phi_in is not None,
         "has_sw_input": sw_in is not None,
         "has_gas_flag": gas_flag is not None,
+        "has_rwa": rwa is not None,
+        "has_dphi_input": dphi_in is not None,
         "gr_mnemonic": gr,
         "rt_mnemonic": rt,
+        "rt_mnemonics": rt_all,
+        "rt_shallow_mnemonic": rt_sh,
+        "rt_micro_mnemonic": rt_mi,
+        "rwa_mnemonic": rwa,
+        "dphi_input_mnemonic": dphi_in,
         "nphi_mnemonic": nphi,
         "rhoz_mnemonic": rhoz,
         "pef_mnemonic": pef,
@@ -374,6 +458,10 @@ def auto_select_curves(df: pd.DataFrame, validation: dict) -> dict:
         ("PHI_INPUT", "phi_input_mnemonic"),
         ("SW_INPUT", "sw_input_mnemonic"),
         ("GAS_FLAG", "gas_flag_mnemonic"),
+        ("DPHI_INPUT", "dphi_input_mnemonic"),
+        ("RWA", "rwa_mnemonic"),
+        ("RT_SHALLOW", "rt_shallow_mnemonic"),
+        ("RT_MICRO", "rt_micro_mnemonic"),
     ):
         mnem = validation.get(key)
         if mnem and mnem in df.columns:

@@ -25,7 +25,14 @@ from sqlalchemy.orm import selectinload
 
 from ..config import settings
 from ..core.ai_interpreter import get_ai_interpretation
-from ..core.las_parser import LASParseError, auto_select_curves, parse_las, validate_curves
+from ..core.ai_zone_picker import run_llm_zone_picker
+from ..core.las_parser import (
+    LASParseError,
+    auto_select_curves,
+    find_resistivity_mnemonics,
+    parse_las,
+    validate_curves,
+)
 from ..core.petrophysics import PetroParams, PetroResult, run_petrophysics
 from ..database import get_db
 from ..middleware.auth import get_current_user
@@ -79,6 +86,47 @@ def _downsample_indices(n: int, max_points: int) -> np.ndarray:
     return np.linspace(0, n - 1, max_points).astype(int)
 
 
+def _downsample_indices_preserve_peaks(
+    values: np.ndarray, n: int, max_points: int
+) -> np.ndarray:
+    """One index per depth bucket, choosing the **highest** finite sample in each.
+
+    Used for resistivity overview so isolated high-RT spikes (pay indicators)
+    are not dropped by uniform linspace downsampling — matches Excel scatter
+    plots where overshoots remain visible.
+    """
+    if n <= max_points:
+        return np.arange(n, dtype=np.intp)
+    arr = np.asarray(values, dtype=np.float64)
+    edges = np.linspace(0, n, max_points + 1).astype(np.intp)
+    picks: list[int] = []
+    for b in range(max_points):
+        lo = int(edges[b])
+        hi = int(edges[b + 1])
+        if hi <= lo:
+            hi = min(lo + 1, n)
+        seg = arr[lo:hi]
+        finite = np.isfinite(seg)
+        if np.any(finite):
+            picks.append(lo + int(np.nanargmax(np.where(finite, seg, -np.inf))))
+        else:
+            picks.append(lo)
+    return np.array(picks, dtype=np.intp)
+
+
+def _overview_indices(
+    depth_len: int,
+    rt: np.ndarray,
+    *,
+    max_points: int,
+) -> np.ndarray:
+    """Overview row indices: even depth coverage plus RT peak preservation."""
+    base = _downsample_indices(depth_len, max_points)
+    peaks = _downsample_indices_preserve_peaks(rt, depth_len, max_points)
+    merged = np.unique(np.concatenate([base, peaks]))
+    return np.sort(merged)
+
+
 def _zone_window_indices(
     depth: np.ndarray, top_ft: float, bot_ft: float, padding_ft: float = 100.0
 ) -> np.ndarray:
@@ -97,12 +145,25 @@ def _persist_raw_arrays(
     *,
     persist_las_df: Any | None,
     curve_map: dict | None,
+    rt_mnemonics: list[str] | None = None,
 ) -> dict:
     """Store original LAS columns by mnemonic so reanalysis can rebuild the DataFrame."""
     raw: dict[str, list] = {"depth": _arr_to_list(result.depth, decimals=3)}
     if persist_las_df is not None and curve_map:
         seen: set[str] = set()
         for _std, mnem in curve_map.items():
+            if not mnem or mnem in seen:
+                continue
+            seen.add(str(mnem))
+            if mnem in persist_las_df.columns:
+                raw[str(mnem)] = _arr_to_list(
+                    persist_las_df[mnem].to_numpy(dtype=np.float64),
+                    decimals=4,
+                )
+        rt_cols = find_resistivity_mnemonics(
+            [c for c in persist_las_df.columns if c != "DEPT"]
+        )
+        for mnem in rt_cols + list(rt_mnemonics or []):
             if not mnem or mnem in seen:
                 continue
             seen.add(str(mnem))
@@ -153,12 +214,20 @@ def _dataframe_from_stored_raw(raw: dict, curve_map: dict | None) -> Any:
     return pd.DataFrame(out)
 
 
+def _rt_array_from_df(df: Any, mnemonic: str) -> np.ndarray:
+    """Resistivity column with the same null/clip rules as petrophysics."""
+    arr = df[mnemonic].to_numpy(dtype=np.float64)
+    arr[(arr < 0.01) | (arr > 10000)] = np.nan
+    return arr
+
+
 def _build_log_payload(
     result: PetroResult,
     *,
     overview_max: int = 3000,
     persist_las_df: Any | None = None,
     curve_map: dict | None = None,
+    rt_mnemonics: list[str] | None = None,
 ) -> dict:
     """Build the on-disk log array payload for ``result_json``."""
     arrays = {
@@ -180,7 +249,23 @@ def _build_log_payload(
     }
 
     n = len(result.depth)
-    ov_idx = _downsample_indices(n, overview_max)
+    ov_idx = _overview_indices(n, arrays["RT"], max_points=overview_max)
+    rt_curves_ov: dict[str, list] = {}
+    primary_rt = (curve_map or {}).get("RT")
+    rt_list: list[str] = []
+    if persist_las_df is not None:
+        rt_list = find_resistivity_mnemonics(
+            [c for c in persist_las_df.columns if c != "DEPT"]
+        )
+    if not rt_list and rt_mnemonics:
+        rt_list = list(rt_mnemonics)
+    if persist_las_df is not None and rt_list:
+        for mnem in rt_list:
+            if not mnem or mnem == primary_rt or mnem not in persist_las_df.columns:
+                continue
+            rt_arr = _rt_array_from_df(persist_las_df, mnem)
+            rt_curves_ov[str(mnem)] = _arr_to_list(rt_arr[ov_idx], decimals=3)
+
     overview = {
         "depth": _arr_to_list(arrays["depth"][ov_idx], decimals=2),
         "GR": _arr_to_list(arrays["GR"][ov_idx], decimals=2),
@@ -188,6 +273,7 @@ def _build_log_payload(
         "DPHI": _arr_to_list(arrays["DPHI"][ov_idx], decimals=4),
         "RHOZ": _arr_to_list(arrays["RHOZ"][ov_idx], decimals=4),
         "RT": _arr_to_list(arrays["RT"][ov_idx], decimals=3),
+        "rt_curves": rt_curves_ov,
         "PEF": _arr_to_list(arrays["PEF"][ov_idx], decimals=3),
         "SP": _arr_to_list(arrays["SP"][ov_idx], decimals=2),
         "Vsh": _arr_to_list(arrays["Vsh"][ov_idx], decimals=4),
@@ -239,6 +325,22 @@ def _build_log_payload(
             "pef_distribution": result.pef_distribution,
             "rho_ma_auto": bool(result.rho_ma_auto),
             "Rw_auto": bool(result.Rw_auto),
+            "Rw_method": result.Rw_method or None,
+            "rw_sp_ohmm": (
+                round(float(result.rw_sp), 4)
+                if result.rw_sp is not None and np.isfinite(result.rw_sp)
+                else None
+            ),
+            "rmf_bht_ohmm": (
+                round(float(result.rmf_bht), 4)
+                if result.rmf_bht is not None and np.isfinite(result.rmf_bht)
+                else None
+            ),
+            "ssp_mv": (
+                round(float(result.ssp_mv), 2)
+                if result.ssp_mv is not None and np.isfinite(result.ssp_mv)
+                else None
+            ),
             "sp_used": bool(result.sp_used),
             "sp_shale_baseline": (
                 round(float(result.sp_shale_baseline), 2)
@@ -254,7 +356,10 @@ def _build_log_payload(
             "used_sw_input": bool(result.used_sw_input),
         },
         "raw_arrays": _persist_raw_arrays(
-            result, persist_las_df=persist_las_df, curve_map=curve_map
+            result,
+            persist_las_df=persist_las_df,
+            curve_map=curve_map,
+            rt_mnemonics=rt_mnemonics,
         ),
     }
 
@@ -320,6 +425,7 @@ def _well_to_summary(well: Well) -> WellSummary:
         zone_count=len(zones),
         oil_zone_count=sum(1 for z in zones if z.zone_type == "OIL"),
         gas_zone_count=sum(1 for z in zones if z.zone_type == "GAS"),
+        analysis_mode=_analysis_mode_for_api(getattr(well, "analysis_mode", None)),
     )
 
 
@@ -341,15 +447,68 @@ def _well_to_detail(well: Well) -> WellDetail:
 # ---------------------------------------------------------------------------
 
 
+_ALLOWED_MODES = {"deterministic", "llm"}
+# Retired experiment modes — treat as deterministic if still stored on a well.
+_LEGACY_MODES = {"llm_params", "llm_full"}
+
+
+def _analysis_mode_for_api(mode: Optional[str]) -> str:
+    """Map a stored ``analysis_mode`` to a supported API value."""
+    if mode is None:
+        return "deterministic"
+    m = str(mode).strip().lower()
+    if m in _ALLOWED_MODES:
+        return m
+    if m in _LEGACY_MODES:
+        return "deterministic"
+    return "deterministic"
+
+
+def _normalize_mode(mode: Optional[str]) -> str:
+    if mode is None:
+        return "deterministic"
+    m = str(mode).strip().lower()
+    if m in _LEGACY_MODES:
+        return "deterministic"
+    if m not in _ALLOWED_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown analysis_mode {mode!r}. Allowed: {sorted(_ALLOWED_MODES)}.",
+        )
+    return m
+
+
 async def _run_full_analysis(
     df,
     curve_map: dict,
     params: PetroParams,
     meta_for_ai: dict,
-) -> tuple[PetroResult, dict]:
-    result = run_petrophysics(df, curve_map, params)
+    *,
+    analysis_mode: str = "deterministic",
+    las_raw_params: dict | None = None,
+) -> tuple[PetroResult, dict, dict | None]:
+    """Run the petrophysics pipeline in the requested mode and tack on
+    the AI narrative.
+
+    Mode dispatch:
+      • ``deterministic`` — numpy engine end-to-end; LLM only narrates.
+      • ``llm``           — numpy curves; LLM picks the zones.
+
+    Returns ``(result, ai_interpretation, picker_meta)``. ``picker_meta``
+    is ``None`` for the deterministic mode and a dict for ``llm``.
+    """
+    result = run_petrophysics(
+        df, curve_map, params, las_raw_params=las_raw_params
+    )
+
+    picker_meta: dict | None = None
+    if analysis_mode == "llm":
+        picker_meta = await run_llm_zone_picker(
+            result, meta_for_ai, settings.ANTHROPIC_API_KEY
+        )
+
     ai = await get_ai_interpretation(result, meta_for_ai, settings.ANTHROPIC_API_KEY)
-    return result, ai
+    return result, ai, picker_meta
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +529,7 @@ async def upload_well(
     a: Optional[float] = Form(None),
     m: Optional[float] = Form(None),
     n: Optional[float] = Form(None),
+    analysis_mode: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -410,6 +570,7 @@ async def upload_well(
 
     curve_map = auto_select_curves(las_data.df, validation)
     params = _params_from_form(rho_ma, rho_fl, Rw, a, m, n)
+    mode = _normalize_mode(analysis_mode)
 
     curves_available = [c["name"] for c in las_data.meta.curves]
     meta_for_ai = {
@@ -421,8 +582,13 @@ async def upload_well(
     }
 
     try:
-        result, ai = await _run_full_analysis(
-            las_data.df, curve_map, params, meta_for_ai
+        result, ai, zp_meta = await _run_full_analysis(
+            las_data.df,
+            curve_map,
+            params,
+            meta_for_ai,
+            analysis_mode=mode,
+            las_raw_params=las_data.meta.raw_params,
         )
     except Exception as exc:
         logger.exception("Analysis failure")
@@ -432,12 +598,18 @@ async def upload_well(
         )
 
     log_payload = _build_log_payload(
-        result, persist_las_df=las_data.df, curve_map=curve_map
+        result,
+        persist_las_df=las_data.df,
+        curve_map=curve_map,
+        rt_mnemonics=validation.get("rt_mnemonics") or [],
     )
     log_payload["curve_map"] = curve_map
+    log_payload["las_params"] = las_data.meta.raw_params
     log_payload["validation"] = {
         k: v for k, v in validation.items() if k not in ("missing_critical",)
     }
+    if zp_meta is not None:
+        log_payload["zone_picker"] = zp_meta
 
     well = Well(
         user_id=current_user.id,
@@ -455,6 +627,7 @@ async def upload_well(
         petro_params=result.params_used.to_dict(),
         result_json=log_payload,
         ai_interpretation=ai,
+        analysis_mode=mode,
     )
     db.add(well)
     await db.flush()  # populate well.id
@@ -479,6 +652,8 @@ async def upload_well(
             producible_pct=z["producible_pct"],
             lith_flag=z["lith_flag"],
             ai_note=ai_notes.get(i),
+            ai_rationale=z.get("ai_rationale"),
+            ai_confidence=z.get("ai_confidence"),
         )
         db.add(zone)
 
@@ -684,8 +859,18 @@ async def reanalyze_well(
     # triggers re-auto-estimation; sliders that always submit a number keep
     # working unchanged.
     update = payload.model_dump(exclude_unset=True)
+    update_mode = update.pop("analysis_mode", None)
     for k, v in update.items():
         setattr(base, k, v)
+
+    # Use the explicitly requested mode if provided; otherwise stick with the
+    # mode the well was previously analyzed under. Default to deterministic
+    # for legacy rows that pre-date the column.
+    mode = _normalize_mode(
+        update_mode
+        if update_mode is not None
+        else (getattr(well, "analysis_mode", None) or "deterministic")
+    )
 
     meta_for_ai = {
         "well_name": well.well_name,
@@ -695,8 +880,17 @@ async def reanalyze_well(
         "curves_available": list(well.curves_available or []),
     }
 
+    las_raw = (rj.get("las_params") or {}) if isinstance(rj, dict) else {}
+
     try:
-        result, ai = await _run_full_analysis(df, curve_map, base, meta_for_ai)
+        result, ai, zp_meta = await _run_full_analysis(
+            df,
+            curve_map,
+            base,
+            meta_for_ai,
+            analysis_mode=mode,
+            las_raw_params=las_raw or None,
+        )
     except Exception as exc:
         logger.exception("Reanalysis failure")
         raise HTTPException(
@@ -704,10 +898,29 @@ async def reanalyze_well(
             detail=f"Reanalysis failed: {exc}",
         )
 
+    stored_val = rj.get("validation") or {}
+    rt_mnemonics = list(stored_val.get("rt_mnemonics") or [])
+    if not rt_mnemonics and curve_map.get("RT"):
+        rt_mnemonics = [curve_map["RT"]]
+    rt_from_df = find_resistivity_mnemonics([c for c in df.columns if c != "DEPT"])
+    for mnem in rt_from_df:
+        if mnem not in rt_mnemonics:
+            rt_mnemonics.append(mnem)
+
     log_payload = _build_log_payload(
-        result, persist_las_df=df, curve_map=curve_map
+        result,
+        persist_las_df=df,
+        curve_map=curve_map,
+        rt_mnemonics=rt_mnemonics,
     )
     log_payload["curve_map"] = curve_map
+    if stored_val:
+        log_payload["validation"] = {
+            **stored_val,
+            "rt_mnemonics": rt_mnemonics,
+        }
+    if zp_meta is not None:
+        log_payload["zone_picker"] = zp_meta
 
     # Persist the resolved parameter set so subsequent re-analyses can start
     # from the same numbers — re-auto only happens when the caller explicitly
@@ -715,6 +928,7 @@ async def reanalyze_well(
     well.petro_params = result.params_used.to_dict()
     well.result_json = log_payload
     well.ai_interpretation = ai
+    well.analysis_mode = mode
 
     # Replace zones
     await db.execute(sql_delete(HcZone).where(HcZone.well_id == well.id))
@@ -738,6 +952,8 @@ async def reanalyze_well(
                 producible_pct=z["producible_pct"],
                 lith_flag=z["lith_flag"],
                 ai_note=ai_notes.get(i),
+                ai_rationale=z.get("ai_rationale"),
+                ai_confidence=z.get("ai_confidence"),
             )
         )
 
