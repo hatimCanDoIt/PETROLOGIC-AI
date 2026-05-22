@@ -49,6 +49,8 @@ interface LogViewerProps {
   curvesAvailable?: string[]
   /** When set, ruler + track widths persist in localStorage for this key (e.g. well id). */
   layoutStorageKey?: string
+  activeZoneId?: string | null
+  onZoneSelect?: (zoneId: string) => void
 }
 
 interface ReferenceLineConfig {
@@ -95,6 +97,35 @@ function escapeHtmlText(s: string) {
 
 function hideReadingTooltip() {
   document.getElementById('tooltip')?.classList.remove('visible')
+}
+
+/** Keep the reading tooltip inside the viewport; flip above/left of cursor when needed. */
+function positionReadingTooltip(
+  tip: HTMLElement,
+  clientX: number,
+  clientY: number,
+  offset = 14,
+  margin = 10,
+) {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const w = tip.offsetWidth
+  const h = tip.offsetHeight
+
+  let left = clientX + offset
+  if (left + w + margin > vw) {
+    left = clientX - w - offset
+  }
+  left = Math.max(margin, Math.min(left, vw - w - margin))
+
+  let top = clientY + offset
+  if (top + h + margin > vh) {
+    top = clientY - h - offset
+  }
+  top = Math.max(margin, Math.min(top, vh - h - margin))
+
+  tip.style.left = `${left}px`
+  tip.style.top = `${top}px`
 }
 
 function readingTooltipHtml(
@@ -331,7 +362,7 @@ function ResizeStrip({
 }
 
 const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer(
-  { result, zones, curvesAvailable, layoutStorageKey },
+  { result, zones, curvesAvailable, layoutStorageKey, activeZoneId, onZoneSelect },
   ref,
 ) {
   const overview = result.overview
@@ -1010,11 +1041,13 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
   const zonesAsOverlays = useMemo(
     () =>
       zones.map((z) => ({
+        id: z.id,
         zone_type: z.zone_type,
         top_ft: z.top_ft,
         bot_ft: z.bot_ft,
+        selected: activeZoneId === z.id,
       })),
-    [zones],
+    [zones, activeZoneId],
   )
 
   const contentHeight = Math.max(
@@ -1058,8 +1091,8 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
 
     tip.innerHTML = readingTooltipHtml(ftAtCursor, visibleTracks, palette.textBright)
     tip.classList.add('visible')
-    tip.style.left = `${clientX + 14}px`
-    tip.style.top = `${clientY + 14}px`
+    positionReadingTooltip(tip, clientX, clientY)
+    requestAnimationFrame(() => positionReadingTooltip(tip, clientX, clientY))
   }
 
   function handleCrosshairMove(e: React.MouseEvent<HTMLDivElement>) {
@@ -1071,6 +1104,18 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     lastClientRef.current = null
     setCrosshairContentY(null)
     hideReadingTooltip()
+  }
+
+  function handleLogClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (!onZoneSelect || zones.length === 0) return
+    const sc = containerRef.current
+    if (!sc) return
+    const r = sc.getBoundingClientRect()
+    const contentY = e.clientY - r.top + sc.scrollTop
+    if (contentY < TRACK_HEADER_PX || contentY > contentHeight) return
+    const ft = depthMin + (contentY - TRACK_HEADER_PX) / pxPerFtZ
+    const hit = zones.find((z) => ft >= z.top_ft && ft <= z.bot_ft)
+    if (hit) onZoneSelect(hit.id)
   }
 
   function handleScrollerScroll() {
@@ -1196,6 +1241,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
         onScroll={handleScrollerScroll}
         onMouseMove={handleCrosshairMove}
         onMouseLeave={handleCrosshairLeave}
+        onClick={handleLogClick}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-auto [scrollbar-gutter:stable]"
       >
         <div

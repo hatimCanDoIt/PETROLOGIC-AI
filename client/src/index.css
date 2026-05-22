@@ -215,6 +215,8 @@
   word-break: break-word;
   min-width: 120px;
   max-width: min(22rem, 92vw);
+  max-height: min(70vh, 24rem);
+  overflow-y: auto;
   line-height: 1.45;
 }
 html.dark #tooltip {

@@ -427,3 +427,5 @@ def test_low_rt_invasion_pay():
     pay = res.zones[0]
     assert pay["type"] in ("OIL", "GAS")
     assert pay["top_ft"] >= 8030.0
+    assert pay["producible_pct"] > 0.0
+    assert pay["sw_pct"] < 50.0

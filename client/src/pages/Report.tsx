@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
 
+import CrossplotWorkspace from '@/components/report/CrossplotWorkspace'
 import ExportButton from '@/components/report/ExportButton'
-import NDCrossplot from '@/components/report/NDCrossplot'
 import ReanalyzeModal from '@/components/report/ReanalyzeModal'
 import ZoneCard from '@/components/report/ZoneCard'
 import Badge from '@/components/ui/Badge'
@@ -15,43 +15,7 @@ import LogViewer, { type LogViewerHandle } from '@/components/tracks/LogViewer'
 import { useReanalyzeWell, useWell } from '@/hooks/useWell'
 import type { AIInterpretation, PetroParams } from '@/types'
 
-type Tab = 'zones' | 'crossplot'
-
-interface TabDef {
-  id: Tab
-  label: string
-  short: string
-  icon: JSX.Element
-}
-
-const TABS: TabDef[] = [
-  {
-    id: 'zones',
-    label: 'Zones',
-    short: 'ZN',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <rect x="4" y="5" width="16" height="4" rx="1" />
-        <rect x="4" y="11" width="16" height="3" rx="1" opacity="0.6" />
-        <rect x="4" y="16" width="16" height="3" rx="1" opacity="0.35" />
-      </svg>
-    ),
-  },
-  {
-    id: 'crossplot',
-    label: 'Crossplot',
-    short: 'XP',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M4 4v16h16" />
-        <circle cx="9" cy="14" r="1.2" />
-        <circle cx="13" cy="10" r="1.2" />
-        <circle cx="17" cy="7" r="1.2" />
-        <circle cx="11" cy="17" r="1.2" />
-      </svg>
-    ),
-  },
-]
+type ReportView = 'logs' | 'crossplots'
 
 const RHS_PANEL_LS_KEY = 'petrologic:reportRhsWidthPx'
 const MAIN_MIN_WIDTH_PX = 200
@@ -207,8 +171,9 @@ export default function Report() {
   const reanalyze = useReanalyzeWell(wellId)
   const logRef = useRef<LogViewerHandle | null>(null)
   const bodyRowRef = useRef<HTMLDivElement | null>(null)
+  const zoneCardRefs = useRef(new Map<string, HTMLDivElement>())
   const [activeZoneId, setActiveZoneId] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('zones')
+  const [view, setView] = useState<ReportView>('logs')
   const [panelOpen, setPanelOpen] = useState(true)
   const [reanalyzeOpen, setReanalyzeOpen] = useState(false)
   const [rhsWidthPx, setRhsWidthPx] = useState(() => {
@@ -229,25 +194,45 @@ export default function Report() {
     setActiveZoneId(zone.id)
   }, [])
 
-  const openPanel = (next?: Tab) => {
-    if (next) setTab(next)
+  const selectZoneFromLog = useCallback((zoneId: string) => {
+    setActiveZoneId(zoneId)
+    setView('logs')
     setPanelOpen(true)
-  }
+    requestAnimationFrame(() => {
+      zoneCardRefs.current.get(zoneId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }, [])
 
-  // Keyboard shortcut: `\` toggles the analysis panel.
+  const viewZoneInLogs = useCallback(
+    (zoneId: string) => {
+      const zone = data?.zones.find((z) => z.id === zoneId)
+      setView('logs')
+      setPanelOpen(true)
+      if (zone) jumpToZone(zone)
+      else setActiveZoneId(zoneId)
+    },
+    [data?.zones, jumpToZone],
+  )
+
+  const registerZoneCardRef = useCallback((zoneId: string, el: HTMLDivElement | null) => {
+    if (el) zoneCardRefs.current.set(zoneId, el)
+    else zoneCardRefs.current.delete(zoneId)
+  }, [])
+
+  // Keyboard shortcut: `\` toggles the zones panel (log view only).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
       const tag = target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return
-      if (e.key === '\\') {
+      if (e.key === '\\' && view === 'logs') {
         e.preventDefault()
         setPanelOpen((v) => !v)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [view])
 
   // Keep RHS width within [min, max] as the report body resizes (window / zoom / devtools).
   useEffect(() => {
@@ -421,7 +406,41 @@ export default function Report() {
             ))}
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <div
+            className="flex rounded-md border border-border-muted p-0.5"
+            role="tablist"
+            aria-label="Report view"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'logs'}
+              onClick={() => setView('logs')}
+              className={clsx(
+                'rounded px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest transition-colors',
+                view === 'logs'
+                  ? 'bg-accent/15 text-accent'
+                  : 'text-text-dim hover:text-text-bright',
+              )}
+            >
+              Log interpretation
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'crossplots'}
+              onClick={() => setView('crossplots')}
+              className={clsx(
+                'rounded px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest transition-colors',
+                view === 'crossplots'
+                  ? 'bg-accent/15 text-accent'
+                  : 'text-text-dim hover:text-text-bright',
+              )}
+            >
+              Crossplot analysis
+            </button>
+          </div>
           <ExportButton wellId={data.id} wellName={data.well_name} logDate={data.log_date} />
           <Button
             size="sm"
@@ -439,30 +458,42 @@ export default function Report() {
         </div>
       </header>
 
-      {/* Main + resizable RHS */}
+      {/* Main workspace */}
       <div
         ref={bodyRowRef}
         className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden"
       >
-        {/* Log viewer (DepthRuler is inside) */}
-        <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {reanalyze.isPending && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center surface-scrim backdrop-blur-sm">
-              <div className="panel flex items-center gap-3 px-6 py-4 text-text">
-                <Spinner /> Re-running petrophysics + AI…
-              </div>
-            </div>
-          )}
-          <LogViewer
-            ref={logRef}
+        {view === 'crossplots' ? (
+          <CrossplotWorkspace
             result={data.result_json}
             zones={data.zones}
-            curvesAvailable={data.curves_available}
-            layoutStorageKey={data.id}
+            wellId={data.id}
+            activeZoneId={activeZoneId}
+            onViewZoneInLogs={viewZoneInLogs}
+            onZoneFocus={setActiveZoneId}
           />
-        </section>
+        ) : (
+          <>
+            <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {reanalyze.isPending && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center surface-scrim backdrop-blur-sm">
+                  <div className="panel flex items-center gap-3 px-6 py-4 text-text">
+                    <Spinner /> Re-running petrophysics + AI…
+                  </div>
+                </div>
+              )}
+              <LogViewer
+                ref={logRef}
+                result={data.result_json}
+                zones={data.zones}
+                curvesAvailable={data.curves_available}
+                layoutStorageKey={data.id}
+                activeZoneId={activeZoneId}
+                onZoneSelect={selectZoneFromLog}
+              />
+            </section>
 
-        {panelOpen ? (
+            {panelOpen ? (
           <>
             <div
               role="separator"
@@ -508,24 +539,13 @@ export default function Report() {
               style={{ flex: `0 0 ${rhsWidthPx}px`, maxWidth: '100%' }}
             >
               <div className="shrink-0 border-b border-border bg-bg-deep">
-                <div className="flex min-h-11 min-w-0">
-                  {TABS.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTab(t.id)}
-                      className={clsx(
-                        'min-w-0 flex-1 shrink px-2 py-3 font-mono text-[10px] uppercase tracking-widest transition-colors',
-                        tab === t.id
-                          ? 'border-b-2 border-accent surface-tab-subtle text-accent'
-                          : 'text-text-dim hover:text-text',
-                      )}
-                    >
-                      <span className="block truncate text-center">{t.label}</span>
-                    </button>
-                  ))}
+                <div className="flex min-h-11 items-center border-b border-border-muted px-[clamp(0.6rem,4vw,1rem)]">
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-accent">
+                    Pay zones &amp; interpretation
+                  </span>
                 </div>
 
-                <div className="flex flex-wrap gap-x-[clamp(0.75rem,5vw,1.5rem)] gap-y-1 border-t border-border-muted px-[clamp(0.6rem,4vw,1rem)] py-2 font-mono text-[10px] text-text-dim">
+                <div className="flex flex-wrap gap-x-[clamp(0.75rem,5vw,1.5rem)] gap-y-1 px-[clamp(0.6rem,4vw,1rem)] py-2 font-mono text-[10px] text-text-dim">
                   <span className="shrink-0">
                     Zones{' '}
                     <span className="tabular-nums text-text-bright">{data.zones.length}</span>
@@ -542,35 +562,27 @@ export default function Report() {
               </div>
 
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-[clamp(0.75rem,4vw,1.25rem)]">
-                {tab === 'zones' && (
-                  <>
-                    <WellLevelAISummary ai={data.ai_interpretation} />
-                    {data.zones.length === 0 && (
-                      <p className="py-12 text-center text-sm text-text-dim">
-                        No HC zones detected with current parameters.
-                      </p>
-                    )}
-                    {data.zones.map((z, i) => (
-                      <ZoneCard
-                        key={z.id}
-                        zone={z}
-                        index={i}
-                        selected={activeZoneId === z.id}
-                        onJump={jumpToZone}
-                        zoneAi={zoneInterpretationFor(data.ai_interpretation, i)}
-                      />
-                    ))}
-                  </>
+                <WellLevelAISummary ai={data.ai_interpretation} />
+                {data.zones.length === 0 && (
+                  <p className="py-12 text-center text-sm text-text-dim">
+                    No HC zones detected with current parameters.
+                  </p>
                 )}
-
-                {tab === 'crossplot' && (
-                  <NDCrossplot result={data.result_json} zones={data.zones} wellId={data.id} />
-                )}
+                {data.zones.map((z, i) => (
+                  <ZoneCard
+                    key={z.id}
+                    zone={z}
+                    index={i}
+                    selected={activeZoneId === z.id}
+                    onJump={jumpToZone}
+                    cardRef={(el) => registerZoneCardRef(z.id, el)}
+                    zoneAi={zoneInterpretationFor(data.ai_interpretation, i)}
+                  />
+                ))}
               </div>
             </aside>
           </>
         ) : (
-          /* Collapsed rail */
           <aside
             style={{ flexBasis: 'clamp(2.25rem, 12vw, 3rem)' }}
             className={clsx(
@@ -578,22 +590,21 @@ export default function Report() {
               'py-[clamp(0.25rem,1.75vw,1.25rem)]',
             )}
           >
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => openPanel(t.id)}
-                title={`${t.label} (open with \\)`}
-                className={clsx(
-                  'flex aspect-square w-[min(2rem,85%)] max-w-[2rem] items-center justify-center rounded transition-colors',
-                  tab === t.id
-                    ? 'border border-accent/40 bg-bg-deep text-accent'
-                    : 'text-text-dim hover:bg-bg-deep hover:text-accent',
-                )}
-              >
-                {t.icon}
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => setPanelOpen(true)}
+              title="Show pay zones panel (\\)"
+              className="flex aspect-square w-[min(2rem,85%)] max-w-[2rem] items-center justify-center rounded border border-accent/40 bg-bg-deep text-accent"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <rect x="4" y="5" width="16" height="4" rx="1" />
+                <rect x="4" y="11" width="16" height="3" rx="1" opacity="0.6" />
+                <rect x="4" y="16" width="16" height="3" rx="1" opacity="0.35" />
+              </svg>
+            </button>
           </aside>
+        )}
+          </>
         )}
       </div>
 

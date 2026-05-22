@@ -9,6 +9,7 @@ interface ZoneCardProps {
   index: number
   onJump: (zone: HcZoneOut) => void
   selected?: boolean
+  cardRef?: (el: HTMLDivElement | null) => void
   /** Structured AI interpretation for this zone (matches ``zone_index`` from the API). */
   zoneAi?: AIZoneInterpretation | null
 }
@@ -73,7 +74,7 @@ function ZoneAiNarrative({ z }: { z: AIZoneInterpretation }) {
   )
 }
 
-export default function ZoneCard({ zone, index, onJump, selected, zoneAi }: ZoneCardProps) {
+export default function ZoneCard({ zone, index, onJump, selected, cardRef, zoneAi }: ZoneCardProps) {
   const palette = useChartPalette()
   const isOil = zone.zone_type === 'OIL'
   const tone = isOil ? 'oil' : 'gas'
@@ -83,6 +84,7 @@ export default function ZoneCard({ zone, index, onJump, selected, zoneAi }: Zone
 
   return (
     <div
+      ref={cardRef}
       role="button"
       tabIndex={0}
       onClick={activate}

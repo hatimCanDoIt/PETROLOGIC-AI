@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -158,7 +159,6 @@ def _strip_json_fence(text: str) -> str:
     """Remove ```json ... ``` fences if present."""
     text = text.strip()
     if text.startswith("```"):
-        # remove first fence line
         first_newline = text.find("\n")
         if first_newline != -1:
             text = text[first_newline + 1 :]
@@ -167,21 +167,30 @@ def _strip_json_fence(text: str) -> str:
     return text.strip()
 
 
+def _repair_json_text(text: str) -> str:
+    """Fix common LLM JSON mistakes before parsing."""
+    cleaned = _strip_json_fence(text)
+    cleaned = cleaned.replace("\ufeff", "").strip()
+    # Strip trailing commas before } or ]
+    cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+    return cleaned
+
+
 def _extract_json(text: str) -> dict | None:
     """Best-effort JSON extraction from a model response."""
-    cleaned = _strip_json_fence(text)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    # Try to find the outermost {...} block
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
+    candidates = [_repair_json_text(text)]
+    start = candidates[0].find("{")
+    end = candidates[0].rfind("}")
     if start != -1 and end > start:
+        candidates.append(candidates[0][start : end + 1])
+
+    for candidate in candidates:
         try:
-            return json.loads(cleaned[start : end + 1])
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
-            return None
+            continue
     return None
 
 
@@ -228,15 +237,25 @@ async def get_ai_interpretation(
 
     try:
         client = anthropic.AsyncAnthropic(api_key=key)
+        zone_count = len(payload.get("hc_zones") or [])
+        brevity = ""
+        if zone_count > 8:
+            brevity = (
+                f"\n\nThere are {zone_count} HC zones. Keep each "
+                "zone_interpretations entry to 1-2 concise sentences so the "
+                "full JSON fits in the response."
+            )
         user_message = (
             "Interpret the following deterministic petrophysical analysis. "
             "Return the JSON object specified in the system prompt and nothing "
-            "else.\n\nANALYSIS_PAYLOAD:\n"
+            "else."
+            + brevity
+            + "\n\nANALYSIS_PAYLOAD:\n"
             + json.dumps(payload, default=str, indent=2)
         )
         msg = await client.messages.create(
             model=settings.ANTHROPIC_MODEL,
-            max_tokens=2000,
+            max_tokens=8192,
             temperature=0,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
@@ -250,7 +269,38 @@ async def get_ai_interpretation(
         raw_text = "\n".join(text_parts).strip()
 
         parsed: dict[str, Any] | None = _extract_json(raw_text)
+        if parsed is None and raw_text:
+            retry = await client.messages.create(
+                model=settings.ANTHROPIC_MODEL,
+                max_tokens=8192,
+                temperature=0,
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": raw_text},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous reply was not valid JSON. Return ONLY "
+                            "a corrected JSON object matching the schema — no "
+                            "markdown fences, no commentary."
+                        ),
+                    },
+                ],
+            )
+            retry_parts: list[str] = []
+            for block in getattr(retry, "content", []) or []:
+                if getattr(block, "type", None) == "text":
+                    retry_parts.append(getattr(block, "text", "") or "")
+            raw_text = "\n".join(retry_parts).strip()
+            parsed = _extract_json(raw_text)
+
         if parsed is None:
+            logger.warning(
+                "AI interpretation JSON parse failed (len=%s): %s",
+                len(raw_text),
+                raw_text[:500],
+            )
             return {
                 "error": "AI returned non-JSON response",
                 "reason": "Could not parse model output as JSON.",

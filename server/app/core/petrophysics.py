@@ -494,6 +494,40 @@ def _flushed_resistivity(*arrays: Optional[np.ndarray]) -> np.ndarray:
         return np.nanmax(stacked, axis=0)
 
 
+def _merge_flushed_zone_sw(
+    Sw: np.ndarray,
+    *,
+    RT: np.ndarray,
+    RT_rxo: np.ndarray,
+    phi_for_sw: np.ndarray,
+    Rw_arr: np.ndarray,
+    a_arr: np.ndarray,
+    m_arr: np.ndarray,
+    n_arr: np.ndarray,
+    permeable_sp: np.ndarray,
+    invasion_threshold: float = 1.35,
+) -> np.ndarray:
+    """Prefer flushed-zone Archie Sw where invasion indicates low-Rt pay."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        invasion_ratio = RT_rxo / RT
+        Sw_flush = np.power(
+            (a_arr * Rw_arr) / (np.power(phi_for_sw, m_arr) * RT_rxo),
+            1.0 / n_arr,
+        )
+    Sw_flush = np.clip(Sw_flush, 0.0, 1.0)
+    invaded = (
+        np.isfinite(invasion_ratio)
+        & (invasion_ratio > invasion_threshold)
+        & permeable_sp
+    )
+    Sw_out = np.where(
+        invaded & np.isfinite(Sw_flush),
+        np.fmin(Sw, Sw_flush),
+        Sw,
+    )
+    return np.clip(Sw_out, 0.0, 1.0)
+
+
 def _build_pay_masks(
     *,
     valid_mask: np.ndarray,
@@ -872,25 +906,22 @@ def run_petrophysics(
     RT_rxo = _flushed_resistivity(RT_shallow, RT_micro)
     Rwa = _compute_rwa(RT, phi_for_sw, a_arr, m_arr)
 
-    # In low-resistivity pay, deep Rt underestimates HC saturation. Where
-    # invasion is clear (Rxo >> Rt), also compute Archie Sw from the
-    # flushed-zone resistivity and use the optimistic Shc for pay flagging.
-    with np.errstate(invalid="ignore", divide="ignore"):
-        invasion_ratio = RT_rxo / RT
-        Sw_flush = np.power(
-            (a_arr * Rw_arr) / (np.power(phi_for_sw, m_arr) * RT_rxo),
-            1.0 / n_arr,
-        )
-    Sw_flush = np.clip(Sw_flush, 0.0, 1.0)
-    invaded = (
-        np.isfinite(invasion_ratio)
-        & (invasion_ratio > 1.35)
-        & permeable_sp
+    # In low-resistivity pay, deep Rt overestimates Sw. Where invasion is
+    # clear (Rxo >> Rt), prefer flushed-zone Archie Sw for stats and pay.
+    Sw = _merge_flushed_zone_sw(
+        Sw,
+        RT=RT,
+        RT_rxo=RT_rxo,
+        phi_for_sw=phi_for_sw,
+        Rw_arr=Rw_arr,
+        a_arr=a_arr,
+        m_arr=m_arr,
+        n_arr=n_arr,
+        permeable_sp=permeable_sp,
     )
-    Shc_pay = np.where(
-        invaded & np.isfinite(Sw_flush),
-        np.fmax(Shc, 1.0 - Sw_flush),
-        Shc,
+    Shc = np.where(np.isfinite(Sw), 1.0 - Sw, np.nan)
+    BVW = np.where(
+        np.isfinite(phi_eff) & np.isfinite(Sw), phi_eff * Sw, np.nan
     )
 
     # ----- STEP 7: data quality mask
@@ -911,7 +942,7 @@ def run_petrophysics(
         valid_mask=valid_mask,
         Vsh=Vsh,
         phi_eff=phi_eff,
-        Shc=Shc_pay,
+        Shc=Shc,
         RT=RT,
         RT_rxo=RT_rxo,
         Rwa=Rwa,

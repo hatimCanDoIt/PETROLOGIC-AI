@@ -31,9 +31,11 @@ export interface CurveConfig {
 }
 
 export interface ZoneOverlay {
+  id?: string
   zone_type: 'OIL' | 'GAS'
   top_ft: number
   bot_ft: number
+  selected?: boolean
 }
 
 export interface ReferenceLine {
@@ -196,8 +198,8 @@ export default function TrackCanvas({
 
       const lineColor = z.zone_type === 'OIL' ? palette.zoneOilLine : palette.zoneGasLine
       ctx.strokeStyle = lineColor
-      ctx.lineWidth = 1.5
-      ctx.setLineDash([4, 3])
+      ctx.lineWidth = z.selected ? 2.5 : 1.5
+      ctx.setLineDash(z.selected ? [] : [4, 3])
       ctx.beginPath()
       ctx.moveTo(0, top)
       ctx.lineTo(width, top)
