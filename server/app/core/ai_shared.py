@@ -45,6 +45,8 @@ def build_curve_csv(
     *,
     fields: list[str] | None = None,
     include_lith: bool = True,
+    top_ft: float | None = None,
+    bot_ft: float | None = None,
 ) -> str:
     """Compact CSV-like view of the curves for the LLM.
 
@@ -53,8 +55,20 @@ def build_curve_csv(
     output and break parsing).
     """
     use_fields = fields or CURVE_FIELDS
-    n = result.depth.size
-    idx = downsample_indices(n, max_rows)
+    depth = result.depth
+    if top_ft is not None and bot_ft is not None:
+        lo, hi = float(min(top_ft, bot_ft)), float(max(top_ft, bot_ft))
+        window = (depth >= lo) & (depth <= hi)
+        if not np.any(window):
+            return ",".join(use_fields + (["lith"] if include_lith else []))
+        depth = depth[window]
+        n = depth.size
+        row_idx = downsample_indices(n, max_rows)
+        full_idx = np.where(window)[0][row_idx]
+    else:
+        n = depth.size
+        full_idx = downsample_indices(n, max_rows)
+    idx = full_idx
     arrays: dict[str, tuple[np.ndarray, int]] = {
         "depth": (result.depth, 2),
         "GR": (result.GR, 1),

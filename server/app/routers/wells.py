@@ -24,8 +24,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..config import settings
+from ..core.ai_assistant import (
+    assistant_chat,
+    assistant_explain,
+    build_assistant_context,
+)
 from ..core.ai_interpreter import get_ai_interpretation
 from ..core.ai_zone_picker import run_llm_zone_picker
+from ..core.pdf_report import build_report_html, build_report_pdf
+from ..core.petrophysics import summarize_zone_from_result
 from ..core.las_parser import (
     LASParseError,
     auto_select_curves,
@@ -39,7 +46,12 @@ from ..middleware.auth import get_current_user
 from ..models.user import User
 from ..models.well import HcZone, Well
 from ..schemas.well import (
+    AddZoneRequest,
+    AssistantChatRequest,
+    AssistantExplainRequest,
+    AssistantReply,
     HcZoneOut,
+    ProposedZoneOut,
     ReanalyzeRequest,
     WellDetail,
     WellStatsResponse,
@@ -724,6 +736,121 @@ async def well_stats(
     )
 
 
+def _load_petro_from_well(well: Well) -> tuple[PetroResult, dict]:
+    """Rebuild ``PetroResult`` from stored ``raw_arrays`` (no re-upload needed)."""
+    rj = well.result_json or {}
+    raw = rj.get("raw_arrays")
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Original log data is not stored. Please re-upload the LAS file.",
+        )
+    cm_json = rj.get("curve_map")
+    df = _dataframe_from_stored_raw(raw, cm_json if cm_json else None)
+    curve_map: dict = dict(cm_json) if cm_json else {
+        "GR": "GR",
+        "NPHI": "NPHI",
+        "RHOZ": "RHOZ",
+        "RT": "RT",
+        "PEF": "PEF",
+    }
+    if "SP" in df.columns and "SP" not in curve_map:
+        curve_map["SP"] = "SP"
+    stored = well.petro_params or {}
+    base = PetroParams(
+        **{k: stored[k] for k in stored if k in PetroParams.__dataclass_fields__}
+    )
+    las_raw = (rj.get("las_params") or {}) if isinstance(rj, dict) else {}
+    return run_petrophysics(df, curve_map, base, las_raw_params=las_raw or None), curve_map
+
+
+def _meta_for_well(well: Well) -> dict:
+    return {
+        "well_name": well.well_name,
+        "field": well.field,
+        "operator": well.operator,
+        "log_date": well.log_date,
+        "curves_available": list(well.curves_available or []),
+    }
+
+
+def _resolve_assistant_context(
+    well: Well,
+    payload: AssistantExplainRequest | AssistantChatRequest,
+) -> tuple[dict, PetroResult]:
+    result, _ = _load_petro_from_well(well)
+    meta = _meta_for_well(well)
+    zones = list(well.zones or [])
+
+    if payload.context_type == "zone":
+        if not payload.zone_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="zone_id is required for zone context.",
+            )
+        zone = next((z for z in zones if z.id == payload.zone_id), None)
+        if zone is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Zone not found."
+            )
+        zone_index = next((i for i, z in enumerate(zones) if z.id == zone.id), 0)
+        ctx = build_assistant_context(
+            result,
+            meta,
+            context_type="zone",
+            zone=zone,
+            zone_index=zone_index,
+            ai_interpretation=well.ai_interpretation,
+            all_zones=zones,
+        )
+        return ctx, result
+
+    if payload.top_ft is None or payload.bot_ft is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="top_ft and bot_ft are required for interval context.",
+        )
+    if abs(payload.bot_ft - payload.top_ft) < 1.0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected interval must be at least 1 ft thick.",
+        )
+    ctx = build_assistant_context(
+        result,
+        meta,
+        context_type="interval",
+        top_ft=payload.top_ft,
+        bot_ft=payload.bot_ft,
+        ai_interpretation=well.ai_interpretation,
+        all_zones=zones,
+    )
+    return ctx, result
+
+
+def _assistant_to_schema(data: dict) -> AssistantReply:
+    pz = data.get("proposed_zone")
+    proposed = None
+    if isinstance(pz, dict) and pz.get("zone_type") in ("OIL", "GAS"):
+        try:
+            proposed = ProposedZoneOut(
+                zone_type=pz["zone_type"],
+                top_ft=float(pz["top_ft"]),
+                bot_ft=float(pz["bot_ft"]),
+                rationale=str(pz.get("rationale") or ""),
+                confidence=pz.get("confidence"),
+            )
+        except (TypeError, ValueError):
+            proposed = None
+    return AssistantReply(
+        reply=str(data.get("reply") or ""),
+        proposed_zone=proposed,
+        error=data.get("error"),
+        disclaimer=data.get("disclaimer"),
+        generated_at=data.get("generated_at"),
+        model=data.get("model"),
+    )
+
+
 async def _get_user_well(
     well_id: str, current_user: User, db: AsyncSession
 ) -> Well:
@@ -962,3 +1089,339 @@ async def reanalyze_well(
         select(Well).options(selectinload(Well.zones)).where(Well.id == well.id)
     )
     return _well_to_detail(fresh.scalar_one())
+
+
+@router.post("/{well_id}/assistant/explain", response_model=AssistantReply)
+async def assistant_explain_endpoint(
+    well_id: str,
+    payload: AssistantExplainRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    ctx, _ = _resolve_assistant_context(well, payload)
+    data = await assistant_explain(ctx, api_key=settings.ANTHROPIC_API_KEY)
+    return _assistant_to_schema(data)
+
+
+@router.post("/{well_id}/assistant/chat", response_model=AssistantReply)
+async def assistant_chat_endpoint(
+    well_id: str,
+    payload: AssistantChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    ctx, _ = _resolve_assistant_context(well, payload)
+    msgs = [{"role": m.role, "content": m.content} for m in payload.messages]
+    data = await assistant_chat(ctx, msgs, api_key=settings.ANTHROPIC_API_KEY)
+    return _assistant_to_schema(data)
+
+
+@router.post("/{well_id}/zones", response_model=WellDetail, status_code=status.HTTP_201_CREATED)
+async def add_zone(
+    well_id: str,
+    payload: AddZoneRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a user-approved pay zone (e.g. after assistant discussion)."""
+    well = await _get_user_well(well_id, current_user, db)
+    if payload.bot_ft <= payload.top_ft:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="bot_ft must be greater than top_ft.",
+        )
+    if (payload.bot_ft - payload.top_ft) < 1.0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Zone must be at least 1 ft thick.",
+        )
+
+    result, _curve_map = _load_petro_from_well(well)
+    zd = summarize_zone_from_result(
+        result,
+        top_ft=payload.top_ft,
+        bot_ft=payload.bot_ft,
+        zone_type=payload.zone_type,
+    )
+    if zd is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No log samples in the requested depth interval.",
+        )
+
+    zone = HcZone(
+        well_id=well.id,
+        zone_type=zd["type"],
+        top_ft=zd["top_ft"],
+        bot_ft=zd["bot_ft"],
+        thick_ft=zd["thick_ft"],
+        shc_pct=zd["shc_pct"],
+        sw_pct=zd["sw_pct"],
+        phi_pct=zd["phi_pct"],
+        rt_mean=zd["rt_mean"],
+        gr_mean=zd["gr_mean"],
+        vsh_pct=zd["vsh_pct"],
+        pef_mean=zd["pef_mean"],
+        bvw_mean=zd["bvw_mean"],
+        producible_pct=zd["producible_pct"],
+        lith_flag=zd["lith_flag"],
+        ai_note=None,
+        ai_rationale=payload.ai_rationale,
+        ai_confidence=payload.ai_confidence,
+    )
+    db.add(zone)
+    await db.flush()
+
+    rj = dict(well.result_json or {})
+    arrays = {
+        "depth": result.depth,
+        "GR": result.GR,
+        "NPHI": result.NPHI,
+        "DPHI": result.DPHI,
+        "RHOZ": result.RHOZ,
+        "RT": result.RT,
+        "PEF": result.PEF,
+        "SP": result.SP,
+        "Vsh": result.Vsh,
+        "phi_eff": result.phi_eff,
+        "Sw": result.Sw,
+        "Shc": result.Shc,
+        "BVW": result.BVW,
+    }
+    idx = _zone_window_indices(result.depth, zd["top_ft"], zd["bot_ft"])
+    zone_details = list(rj.get("zone_details") or [])
+    zone_details.append(
+        {
+            "zone_index": len(zone_details),
+            "depth": _arr_to_list(arrays["depth"][idx], decimals=2),
+            "GR": _arr_to_list(arrays["GR"][idx], decimals=2),
+            "NPHI": _arr_to_list(arrays["NPHI"][idx], decimals=4),
+            "DPHI": _arr_to_list(arrays["DPHI"][idx], decimals=4),
+            "RHOZ": _arr_to_list(arrays["RHOZ"][idx], decimals=4),
+            "RT": _arr_to_list(arrays["RT"][idx], decimals=3),
+            "PEF": _arr_to_list(arrays["PEF"][idx], decimals=3),
+            "SP": _arr_to_list(arrays["SP"][idx], decimals=2),
+            "Vsh": _arr_to_list(arrays["Vsh"][idx], decimals=4),
+            "phi_eff": _arr_to_list(arrays["phi_eff"][idx], decimals=4),
+            "Sw": _arr_to_list(arrays["Sw"][idx], decimals=4),
+            "Shc": _arr_to_list(arrays["Shc"][idx], decimals=4),
+            "BVW": _arr_to_list(arrays["BVW"][idx], decimals=4),
+            "hc_type": _int_arr_to_list(result.hc_type[idx]),
+            "lith_flag": _int_arr_to_list(result.lith_flag[idx]),
+        }
+    )
+    rj["zone_details"] = zone_details
+    well.result_json = rj
+
+    await db.commit()
+    fresh = await db.execute(
+        select(Well).options(selectinload(Well.zones)).where(Well.id == well.id)
+    )
+    return _well_to_detail(fresh.scalar_one())
+
+
+@router.get("/{well_id}/export/report")
+async def export_report_html(
+    well_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    html_doc = build_report_html(well, list(well.zones), well.ai_interpretation)
+    return Response(content=html_doc, media_type="text/html; charset=utf-8")
+
+
+@router.get("/{well_id}/export/pdf")
+async def export_report_pdf(
+    well_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    try:
+        pdf_bytes = build_report_pdf(well, list(well.zones), well.ai_interpretation)
+    except Exception as exc:
+        logger.exception("PDF export failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"PDF export failed: {exc}",
+        ) from exc
+    safe_well = "".join(
+        c if c.isalnum() or c in "-_" else "_" for c in (well.well_name or "well")
+    )
+    filename = f"{safe_well}_{well.log_date or 'report'}_petrologic.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.post("/{well_id}/assistant/explain", response_model=AssistantReply)
+async def assistant_explain_endpoint(
+    well_id: str,
+    payload: AssistantExplainRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    ctx, _ = _resolve_assistant_context(well, payload)
+    data = await assistant_explain(ctx, api_key=settings.ANTHROPIC_API_KEY)
+    return _assistant_to_schema(data)
+
+
+@router.post("/{well_id}/assistant/chat", response_model=AssistantReply)
+async def assistant_chat_endpoint(
+    well_id: str,
+    payload: AssistantChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    ctx, _ = _resolve_assistant_context(well, payload)
+    msgs = [{"role": m.role, "content": m.content} for m in payload.messages]
+    data = await assistant_chat(ctx, msgs, api_key=settings.ANTHROPIC_API_KEY)
+    return _assistant_to_schema(data)
+
+
+@router.post("/{well_id}/zones", response_model=WellDetail, status_code=status.HTTP_201_CREATED)
+async def add_zone(
+    well_id: str,
+    payload: AddZoneRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a user-approved pay zone (e.g. after assistant discussion)."""
+    well = await _get_user_well(well_id, current_user, db)
+    if payload.bot_ft <= payload.top_ft:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="bot_ft must be greater than top_ft.",
+        )
+    if (payload.bot_ft - payload.top_ft) < 1.0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Zone must be at least 1 ft thick.",
+        )
+
+    result, _curve_map = _load_petro_from_well(well)
+    zd = summarize_zone_from_result(
+        result,
+        top_ft=payload.top_ft,
+        bot_ft=payload.bot_ft,
+        zone_type=payload.zone_type,
+    )
+    if zd is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No log samples in the requested depth interval.",
+        )
+
+    zone = HcZone(
+        well_id=well.id,
+        zone_type=zd["type"],
+        top_ft=zd["top_ft"],
+        bot_ft=zd["bot_ft"],
+        thick_ft=zd["thick_ft"],
+        shc_pct=zd["shc_pct"],
+        sw_pct=zd["sw_pct"],
+        phi_pct=zd["phi_pct"],
+        rt_mean=zd["rt_mean"],
+        gr_mean=zd["gr_mean"],
+        vsh_pct=zd["vsh_pct"],
+        pef_mean=zd["pef_mean"],
+        bvw_mean=zd["bvw_mean"],
+        producible_pct=zd["producible_pct"],
+        lith_flag=zd["lith_flag"],
+        ai_note=None,
+        ai_rationale=payload.ai_rationale,
+        ai_confidence=payload.ai_confidence,
+    )
+    db.add(zone)
+    await db.flush()
+
+    rj = dict(well.result_json or {})
+    arrays = {
+        "depth": result.depth,
+        "GR": result.GR,
+        "NPHI": result.NPHI,
+        "DPHI": result.DPHI,
+        "RHOZ": result.RHOZ,
+        "RT": result.RT,
+        "PEF": result.PEF,
+        "SP": result.SP,
+        "Vsh": result.Vsh,
+        "phi_eff": result.phi_eff,
+        "Sw": result.Sw,
+        "Shc": result.Shc,
+        "BVW": result.BVW,
+    }
+    idx = _zone_window_indices(result.depth, zd["top_ft"], zd["bot_ft"])
+    zone_details = list(rj.get("zone_details") or [])
+    zone_details.append(
+        {
+            "zone_index": len(zone_details),
+            "depth": _arr_to_list(arrays["depth"][idx], decimals=2),
+            "GR": _arr_to_list(arrays["GR"][idx], decimals=2),
+            "NPHI": _arr_to_list(arrays["NPHI"][idx], decimals=4),
+            "DPHI": _arr_to_list(arrays["DPHI"][idx], decimals=4),
+            "RHOZ": _arr_to_list(arrays["RHOZ"][idx], decimals=4),
+            "RT": _arr_to_list(arrays["RT"][idx], decimals=3),
+            "PEF": _arr_to_list(arrays["PEF"][idx], decimals=3),
+            "SP": _arr_to_list(arrays["SP"][idx], decimals=2),
+            "Vsh": _arr_to_list(arrays["Vsh"][idx], decimals=4),
+            "phi_eff": _arr_to_list(arrays["phi_eff"][idx], decimals=4),
+            "Sw": _arr_to_list(arrays["Sw"][idx], decimals=4),
+            "Shc": _arr_to_list(arrays["Shc"][idx], decimals=4),
+            "BVW": _arr_to_list(arrays["BVW"][idx], decimals=4),
+            "hc_type": _int_arr_to_list(result.hc_type[idx]),
+            "lith_flag": _int_arr_to_list(result.lith_flag[idx]),
+        }
+    )
+    rj["zone_details"] = zone_details
+    well.result_json = rj
+
+    await db.commit()
+    fresh = await db.execute(
+        select(Well).options(selectinload(Well.zones)).where(Well.id == well.id)
+    )
+    return _well_to_detail(fresh.scalar_one())
+
+
+@router.get("/{well_id}/export/report")
+async def export_report_html(
+    well_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    html_doc = build_report_html(well, list(well.zones), well.ai_interpretation)
+    return Response(content=html_doc, media_type="text/html; charset=utf-8")
+
+
+@router.get("/{well_id}/export/pdf")
+async def export_report_pdf(
+    well_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    well = await _get_user_well(well_id, current_user, db)
+    try:
+        pdf_bytes = build_report_pdf(well, list(well.zones), well.ai_interpretation)
+    except Exception as exc:
+        logger.exception("PDF export failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"PDF export failed: {exc}",
+        ) from exc
+    safe_well = "".join(
+        c if c.isalnum() or c in "-_" else "_" for c in (well.well_name or "well")
+    )
+    filename = f"{safe_well}_{well.log_date or 'report'}_petrologic.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

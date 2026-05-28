@@ -7,11 +7,12 @@ import {
   forwardRef,
   Fragment,
 } from 'react'
+import clsx from 'clsx'
 
 import { PX_PER_FT } from '@/utils/colors'
 import { lithColorsFromPalette } from '@/theme/chartPalette'
 import { useChartPalette } from '@/theme/ThemeProvider'
-import type { HcZoneOut, ResultJson } from '@/types'
+import type { DepthInterval, HcZoneOut, ResultJson } from '@/types'
 
 import DepthRuler from './DepthRuler'
 import TrackCanvas, {
@@ -51,6 +52,9 @@ interface LogViewerProps {
   layoutStorageKey?: string
   activeZoneId?: string | null
   onZoneSelect?: (zoneId: string) => void
+  /** Drag on the log to pick a depth window for Explain with AI. */
+  depthInterval?: DepthInterval | null
+  onDepthIntervalChange?: (interval: DepthInterval | null) => void
 }
 
 interface ReferenceLineConfig {
@@ -197,6 +201,68 @@ function meanRtOhmm(values: (number | null)[], statsMean?: number): number | nul
   const logMean =
     finite.reduce((sum, v) => sum + Math.log10(v), 0) / finite.length
   return 10 ** logMean
+}
+
+function formatLogRtLabel(v: number): string {
+  if (v >= 100) return String(Math.round(v))
+  if (v >= 10) return String(Math.round(v))
+  if (v >= 1) return Number.isInteger(v) ? String(v) : v.toFixed(1)
+  if (v >= 0.1) return v.toFixed(1)
+  if (v >= 0.01) return v.toFixed(2)
+  return v.toExponential(0)
+}
+
+/** Shared log-scale bounds for all resistivity curves on the RT track. */
+function autoLogRtScale(curveValueSets: (number | null)[][]): {
+  xMin: number
+  xMax: number
+  scaleLabel: [string, string]
+  scaleTicks: number[]
+} {
+  const finite: number[] = []
+  for (const values of curveValueSets) {
+    for (const v of values) {
+      if (v != null && Number.isFinite(v) && v > 0) finite.push(v)
+    }
+  }
+
+  const fallback = {
+    xMin: 0.1,
+    xMax: 1000,
+    scaleLabel: ['0.1', '1000'] as [string, string],
+    scaleTicks: [0.1, 1, 10, 100, 1000],
+  }
+  if (finite.length === 0) return fallback
+
+  const dataMin = Math.min(...finite)
+  const dataMax = Math.max(...finite)
+  const logDataMin = Math.log10(dataMin)
+  const logDataMax = Math.log10(dataMax)
+
+  let logMin = Math.floor(logDataMin - 0.08)
+  let logMax = Math.ceil(logDataMax + 0.08)
+  if (logMax - logMin < 0.5) {
+    const mid = (logDataMin + logDataMax) / 2
+    logMin = mid - 0.25
+    logMax = mid + 0.25
+  }
+
+  const tickLogMin = Math.floor(logMin)
+  const tickLogMax = Math.ceil(logMax)
+  const scaleTicks: number[] = []
+  for (let e = tickLogMin; e <= tickLogMax; e++) {
+    scaleTicks.push(10 ** e)
+  }
+
+  const xMin = scaleTicks[0] ?? 10 ** logMin
+  const xMax = scaleTicks[scaleTicks.length - 1] ?? 10 ** logMax
+
+  return {
+    xMin,
+    xMax,
+    scaleLabel: [formatLogRtLabel(xMin), formatLogRtLabel(xMax)],
+    scaleTicks,
+  }
 }
 
 const TRACK_WIDTH_MIN = 100
@@ -362,7 +428,16 @@ function ResizeStrip({
 }
 
 const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer(
-  { result, zones, curvesAvailable, layoutStorageKey, activeZoneId, onZoneSelect },
+  {
+    result,
+    zones,
+    curvesAvailable,
+    layoutStorageKey,
+    activeZoneId,
+    onZoneSelect,
+    depthInterval = null,
+    onDepthIntervalChange,
+  },
   ref,
 ) {
   const overview = result.overview
@@ -590,6 +665,13 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     const meanGr = meanArithmetic(grValues, result.stats?.mean_GR)
     const meanPhie = meanArithmetic(phieValues, result.stats?.mean_phi_eff)
 
+    const rtScaleSets: (number | null)[][] = []
+    for (const mnem of selectedRtMnemonics) {
+      const values = rtValuesForMnemonic(mnem)
+      if (values) rtScaleSets.push(values)
+    }
+    const rtScale = autoLogRtScale(rtScaleSets)
+
     // Sand = low SP (left); shale = high SP (right). Use min/max so labels
     // always match track position even if stored stats were inverted.
     const spShaleRaw = result.stats?.sp_shale_baseline
@@ -708,14 +790,14 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               ]
             : [],
       },
-      // Track 2 — Resistivity (log); multiple RT mnemonics on one track
+      // Track 2 — Resistivity (log); auto-scaled to plotted data range
       {
         id: 'rt',
         sidebarHint: 'Deep Rt, shallow Rxo, micro-resistivity',
         label: 'Resistivity',
         unit: 'Ω·m',
-        scaleLabel: ['0.1', '1000'] as [string, string],
-        scaleTicks: [0.1, 1, 10, 100, 1000],
+        scaleLabel: rtScale.scaleLabel,
+        scaleTicks: rtScale.scaleTicks,
         logScaleHeader: true,
         curves: (() => {
           let overlayIx = 0
@@ -734,8 +816,8 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               colorKey: isPrimary ? ('rt' as const) : undefined,
               renderMode: 'dots' as const,
               dotRadius: isPrimary ? 1.35 : 1.15,
-              xMin: 0.1,
-              xMax: 1000,
+              xMin: rtScale.xMin,
+              xMax: rtScale.xMax,
               logScale: true,
               label:
                 rtCurveRole(mnem) === 'other'
@@ -1057,6 +1139,19 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
 
   const pxPerFtZ = PX_PER_FT * sync.zoomFactor
   const lastClientRef = useRef<{ x: number; y: number } | null>(null)
+  const DRAG_THRESHOLD_PX = 6
+  const pointerDragRef = useRef({
+    active: false,
+    isDrag: false,
+    anchorFt: null as number | null,
+    startClientY: 0,
+  })
+
+  function depthAtContentY(contentY: number): number | null {
+    if (contentY < TRACK_HEADER_PX || contentY > contentHeight) return null
+    const raw = depthMin + (contentY - TRACK_HEADER_PX) / pxPerFtZ
+    return clampDepth(raw, depthMin, depthMax)
+  }
 
   function syncReadingAtClient(clientX: number, clientY: number) {
     const sc = containerRef.current
@@ -1106,17 +1201,99 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     hideReadingTooltip()
   }
 
-  function handleLogClick(e: React.MouseEvent<HTMLDivElement>) {
+  function selectZoneAtDepth(ft: number) {
     if (!onZoneSelect || zones.length === 0) return
+    const hit = zones.find((z) => ft >= z.top_ft && ft <= z.bot_ft)
+    if (hit) onZoneSelect(hit.id)
+  }
+
+  function handleLogPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return
     const sc = containerRef.current
     if (!sc) return
     const r = sc.getBoundingClientRect()
     const contentY = e.clientY - r.top + sc.scrollTop
-    if (contentY < TRACK_HEADER_PX || contentY > contentHeight) return
-    const ft = depthMin + (contentY - TRACK_HEADER_PX) / pxPerFtZ
-    const hit = zones.find((z) => ft >= z.top_ft && ft <= z.bot_ft)
-    if (hit) onZoneSelect(hit.id)
+    const ft = depthAtContentY(contentY)
+    if (ft == null) return
+
+    pointerDragRef.current = {
+      active: true,
+      isDrag: false,
+      anchorFt: ft,
+      startClientY: e.clientY,
+    }
+    if (onDepthIntervalChange) {
+      onDepthIntervalChange(null)
+      e.preventDefault()
+      sc.setPointerCapture(e.pointerId)
+    }
   }
+
+  function handleLogPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = pointerDragRef.current
+    if (!drag.active || drag.anchorFt == null || !onDepthIntervalChange) return
+    if (Math.abs(e.clientY - drag.startClientY) < DRAG_THRESHOLD_PX) return
+
+    const sc = containerRef.current
+    if (!sc) return
+    const r = sc.getBoundingClientRect()
+    const contentY = e.clientY - r.top + sc.scrollTop
+    const ft = depthAtContentY(contentY)
+    if (ft == null) return
+
+    drag.isDrag = true
+    const a = drag.anchorFt
+    onDepthIntervalChange({
+      top_ft: Math.min(a, ft),
+      bot_ft: Math.max(a, ft),
+    })
+  }
+
+  function handleLogPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = pointerDragRef.current
+    if (!drag.active) return
+
+    const sc = containerRef.current
+    if (sc?.hasPointerCapture(e.pointerId)) {
+      sc.releasePointerCapture(e.pointerId)
+    }
+
+    if (drag.isDrag && drag.anchorFt != null) {
+      const r = sc?.getBoundingClientRect()
+      if (sc && r) {
+        const contentY = e.clientY - r.top + sc.scrollTop
+        const ft = depthAtContentY(contentY)
+        if (ft != null) {
+          const lo = Math.min(drag.anchorFt, ft)
+          const hi = Math.max(drag.anchorFt, ft)
+          if (hi - lo >= 1) {
+            onDepthIntervalChange?.({ top_ft: lo, bot_ft: hi })
+          } else {
+            onDepthIntervalChange?.(null)
+          }
+        }
+      }
+    } else if (drag.anchorFt != null) {
+      onDepthIntervalChange?.(null)
+      selectZoneAtDepth(drag.anchorFt)
+    }
+
+    pointerDragRef.current = {
+      active: false,
+      isDrag: false,
+      anchorFt: null,
+      startClientY: 0,
+    }
+  }
+
+  const selectionBandY = useMemo(() => {
+    if (!depthInterval) return null
+    const lo = Math.min(depthInterval.top_ft, depthInterval.bot_ft)
+    const hi = Math.max(depthInterval.top_ft, depthInterval.bot_ft)
+    const top = TRACK_HEADER_PX + (lo - depthMin) * pxPerFtZ
+    const bot = TRACK_HEADER_PX + (hi - depthMin) * pxPerFtZ
+    return { top, height: Math.max(2, bot - top) }
+  }, [depthInterval, depthMin, pxPerFtZ])
 
   function handleScrollerScroll() {
     sync.onScroll()
@@ -1241,13 +1418,30 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
         onScroll={handleScrollerScroll}
         onMouseMove={handleCrosshairMove}
         onMouseLeave={handleCrosshairLeave}
-        onClick={handleLogClick}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-auto [scrollbar-gutter:stable]"
+        onPointerDown={handleLogPointerDown}
+        onPointerMove={(e) => {
+          handleLogPointerMove(e)
+        }}
+        onPointerUp={handleLogPointerUp}
+        onPointerCancel={handleLogPointerUp}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-auto [scrollbar-gutter:stable] select-none"
       >
         <div
           className="relative isolate flex shrink-0"
           style={{ minHeight: contentHeight, alignItems: 'flex-start' }}
         >
+          {selectionBandY && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-0 right-0 top-0 z-[14] border-x-2 border-accent/50"
+              style={{ height: contentHeight }}
+            >
+              <div
+                className="absolute left-0 right-0 bg-accent/20 ring-1 ring-accent/60"
+                style={{ top: selectionBandY.top, height: selectionBandY.height }}
+              />
+            </div>
+          )}
           {crosshairContentY != null &&
             crosshairContentY >= TRACK_HEADER_PX &&
             crosshairContentY <= contentHeight && (
@@ -1294,6 +1488,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
                 width={resolvedTrackWidth(t.id)}
                 curves={t.curves}
                 zones={zonesAsOverlays}
+                intervalHighlight={depthInterval}
                 depthMin={depthMin}
                 depthMax={depthMax}
                 zoomFactor={sync.zoomFactor}

@@ -4,6 +4,8 @@ import clsx from 'clsx'
 
 import CrossplotWorkspace from '@/components/report/CrossplotWorkspace'
 import ExportButton from '@/components/report/ExportButton'
+import LogAssistantChat from '@/components/report/LogAssistantChat'
+import PdfReportModal from '@/components/report/PdfReportModal'
 import ReanalyzeModal from '@/components/report/ReanalyzeModal'
 import ZoneCard from '@/components/report/ZoneCard'
 import Badge from '@/components/ui/Badge'
@@ -12,8 +14,13 @@ import Logo from '@/components/layout/Logo'
 import SkeletonTrack from '@/components/ui/SkeletonTrack'
 import Spinner from '@/components/ui/Spinner'
 import LogViewer, { type LogViewerHandle } from '@/components/tracks/LogViewer'
-import { useReanalyzeWell, useWell } from '@/hooks/useWell'
-import type { AIInterpretation, PetroParams } from '@/types'
+import {
+  useAddZone,
+  useReanalyzeWell,
+  useWell,
+  type AssistantContext,
+} from '@/hooks/useWell'
+import type { AIInterpretation, DepthInterval, HcZoneOut, PetroParams, ProposedZone } from '@/types'
 
 type ReportView = 'logs' | 'crossplots'
 
@@ -176,6 +183,10 @@ export default function Report() {
   const [view, setView] = useState<ReportView>('logs')
   const [panelOpen, setPanelOpen] = useState(true)
   const [reanalyzeOpen, setReanalyzeOpen] = useState(false)
+  const [pdfOpen, setPdfOpen] = useState(false)
+  const [depthInterval, setDepthInterval] = useState<DepthInterval | null>(null)
+  const [assistantContext, setAssistantContext] = useState<AssistantContext | null>(null)
+  const addZone = useAddZone(wellId)
   const [rhsWidthPx, setRhsWidthPx] = useState(() => {
     if (typeof window === 'undefined') return 360
     const stored = Number(localStorage.getItem(RHS_PANEL_LS_KEY))
@@ -218,6 +229,55 @@ export default function Report() {
     if (el) zoneCardRefs.current.set(zoneId, el)
     else zoneCardRefs.current.delete(zoneId)
   }, [])
+
+  const openZoneChat = useCallback((zone: HcZoneOut) => {
+    setActiveZoneId(zone.id)
+    setAssistantContext({ type: 'zone', zoneId: zone.id })
+    setPanelOpen(true)
+    setView('logs')
+  }, [])
+
+  const explainDepthInterval = useCallback(() => {
+    if (!depthInterval) return
+    const lo = Math.min(depthInterval.top_ft, depthInterval.bot_ft)
+    const hi = Math.max(depthInterval.top_ft, depthInterval.bot_ft)
+    if (hi - lo < 1) return
+    setAssistantContext({ type: 'interval', interval: { top_ft: lo, bot_ft: hi } })
+    setPanelOpen(true)
+  }, [depthInterval])
+
+  const handleAddProposedZone = useCallback(
+    async (proposal: ProposedZone) => {
+      if (!wellId) return
+      try {
+        const detail = await addZone.mutateAsync({
+          zone_type: proposal.zone_type,
+          top_ft: proposal.top_ft,
+          bot_ft: proposal.bot_ft,
+          ai_rationale: proposal.rationale,
+          ai_confidence: proposal.confidence ?? undefined,
+        })
+        const added = detail.zones[detail.zones.length - 1]
+        if (added) {
+          setActiveZoneId(added.id)
+          setAssistantContext({ type: 'zone', zoneId: added.id })
+        }
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Could not add zone.')
+      }
+    },
+    [wellId, addZone],
+  )
+
+  const assistantZone =
+    assistantContext?.type === 'zone'
+      ? data?.zones.find((z) => z.id === assistantContext.zoneId)
+      : null
+
+  const intervalThickness =
+    depthInterval != null
+      ? Math.abs(depthInterval.bot_ft - depthInterval.top_ft)
+      : 0
 
   // Keyboard shortcut: `\` toggles the zones panel (log view only).
   useEffect(() => {
@@ -442,6 +502,9 @@ export default function Report() {
             </button>
           </div>
           <ExportButton wellId={data.id} wellName={data.well_name} logDate={data.log_date} />
+          <Button size="sm" variant="secondary" onClick={() => setPdfOpen(true)}>
+            PDF report
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -490,7 +553,29 @@ export default function Report() {
                 layoutStorageKey={data.id}
                 activeZoneId={activeZoneId}
                 onZoneSelect={selectZoneFromLog}
+                depthInterval={depthInterval}
+                onDepthIntervalChange={setDepthInterval}
               />
+              {depthInterval && intervalThickness >= 1 && (
+                <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2">
+                  <div className="panel flex flex-wrap items-center gap-2 px-3 py-2 shadow-lg">
+                    <span className="font-mono text-[10px] text-text-dim">
+                      {Math.min(depthInterval.top_ft, depthInterval.bot_ft).toFixed(0)}–
+                      {Math.max(depthInterval.top_ft, depthInterval.bot_ft).toFixed(0)} ft
+                    </span>
+                    <Button size="sm" onClick={explainDepthInterval}>
+                      Explain with AI
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setDepthInterval(null)}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              )}
             </section>
 
             {panelOpen ? (
@@ -563,6 +648,16 @@ export default function Report() {
 
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-[clamp(0.75rem,4vw,1.25rem)]">
                 <WellLevelAISummary ai={data.ai_interpretation} />
+                {assistantContext && wellId && (
+                  <LogAssistantChat
+                    wellId={wellId}
+                    context={assistantContext}
+                    zone={assistantZone}
+                    onClose={() => setAssistantContext(null)}
+                    onAddZone={handleAddProposedZone}
+                    addingZone={addZone.isPending}
+                  />
+                )}
                 {data.zones.length === 0 && (
                   <p className="py-12 text-center text-sm text-text-dim">
                     No HC zones detected with current parameters.
@@ -577,6 +672,10 @@ export default function Report() {
                     onJump={jumpToZone}
                     cardRef={(el) => registerZoneCardRef(z.id, el)}
                     zoneAi={zoneInterpretationFor(data.ai_interpretation, i)}
+                    onChat={openZoneChat}
+                    chatActive={
+                      assistantContext?.type === 'zone' && assistantContext.zoneId === z.id
+                    }
                   />
                 ))}
               </div>
@@ -616,6 +715,13 @@ export default function Report() {
         loading={reanalyze.isPending}
         rhoMaAuto={data.result_json?.stats?.rho_ma_auto}
         rwAuto={data.result_json?.stats?.Rw_auto}
+      />
+      <PdfReportModal
+        open={pdfOpen}
+        wellId={data.id}
+        wellName={data.well_name}
+        logDate={data.log_date}
+        onClose={() => setPdfOpen(false)}
       />
     </div>
   )

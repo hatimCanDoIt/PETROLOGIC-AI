@@ -56,6 +56,8 @@ export interface TrackCanvasProps {
   width?: number
   curves: CurveConfig[]
   zones?: ZoneOverlay[]
+  /** User-selected depth window (Explain with AI). */
+  intervalHighlight?: { top_ft: number; bot_ft: number } | null
   depthMin: number
   depthMax: number
   zoomFactor: number
@@ -82,6 +84,15 @@ const MAX_CANVAS_PX = 14000
 
 function ftToPx(ft: number, depthMin: number, zoomFactor: number) {
   return (ft - depthMin) * PX_PER_FT * zoomFactor
+}
+
+function formatLogScaleTick(t: number): string {
+  if (t >= 100) return String(Math.round(t))
+  if (t >= 10) return String(Math.round(t))
+  if (t >= 1) return Number.isInteger(t) ? String(t) : t.toFixed(1)
+  if (t >= 0.1) return t.toFixed(1)
+  if (t >= 0.01) return t.toFixed(2)
+  return t.toExponential(0)
 }
 
 function curveValueToX(value: number, curve: CurveConfig, width: number): number | null {
@@ -113,6 +124,7 @@ export default function TrackCanvas({
   width = 160,
   curves,
   zones = [],
+  intervalHighlight = null,
   depthMin,
   depthMax,
   zoomFactor,
@@ -215,6 +227,22 @@ export default function TrackCanvas({
       ctx.fillText(`${z.top_ft.toFixed(0)} ft`, 4, top - 2)
       ctx.textBaseline = 'top'
       ctx.fillText(`${z.bot_ft.toFixed(0)} ft`, 4, bot + 2)
+    }
+
+    if (intervalHighlight) {
+      const lo = Math.min(intervalHighlight.top_ft, intervalHighlight.bot_ft)
+      const hi = Math.max(intervalHighlight.top_ft, intervalHighlight.bot_ft)
+      if (hi >= sliceTopFt - 2 && lo <= sliceBotFt + 2) {
+        const top = ftToY(lo)
+        const bot = ftToY(hi)
+        ctx.fillStyle = 'rgba(17, 126, 154, 0.18)'
+        ctx.fillRect(0, top, width, Math.max(1, bot - top))
+        ctx.strokeStyle = palette.accent
+        ctx.lineWidth = 2
+        ctx.setLineDash([6, 4])
+        ctx.strokeRect(0.5, top + 0.5, width - 1, Math.max(1, bot - top - 1))
+        ctx.setLineDash([])
+      }
     }
 
     // 6) left colour bar (lithology)
@@ -379,6 +407,7 @@ export default function TrackCanvas({
     zoomFactor,
     curves,
     zones,
+    intervalHighlight,
     referenceLines,
     leftColorBar,
     palette,
@@ -472,13 +501,7 @@ export default function TrackCanvas({
             {scaleTicks && (
               <span className="text-text-softer">
                 {scaleTicks
-                  .map((t) =>
-                    logScaleHeader
-                      ? t < 1
-                        ? `0.1`
-                        : t.toString()
-                      : t.toString(),
-                  )
+                  .map((t) => (logScaleHeader ? formatLogScaleTick(t) : t.toString()))
                   .join(' · ')}
               </span>
             )}

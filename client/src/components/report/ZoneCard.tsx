@@ -12,6 +12,8 @@ interface ZoneCardProps {
   cardRef?: (el: HTMLDivElement | null) => void
   /** Structured AI interpretation for this zone (matches ``zone_index`` from the API). */
   zoneAi?: AIZoneInterpretation | null
+  onChat?: (zone: HcZoneOut) => void
+  chatActive?: boolean
 }
 
 function metric(label: string, value: string, color?: string) {
@@ -74,7 +76,16 @@ function ZoneAiNarrative({ z }: { z: AIZoneInterpretation }) {
   )
 }
 
-export default function ZoneCard({ zone, index, onJump, selected, cardRef, zoneAi }: ZoneCardProps) {
+export default function ZoneCard({
+  zone,
+  index,
+  onJump,
+  selected,
+  cardRef,
+  zoneAi,
+  onChat,
+  chatActive,
+}: ZoneCardProps) {
   const palette = useChartPalette()
   const isOil = zone.zone_type === 'OIL'
   const tone = isOil ? 'oil' : 'gas'
@@ -117,9 +128,28 @@ export default function ZoneCard({ zone, index, onJump, selected, cardRef, zoneA
             ({zone.thick_ft.toFixed(1)} ft)
           </span>
         </div>
-        <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-accent">
-          View in log →
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {onChat && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onChat(zone)
+              }}
+              className={clsx(
+                'rounded border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider transition-colors',
+                chatActive
+                  ? 'border-accent bg-accent/15 text-accent'
+                  : 'border-border-muted text-text-dim hover:border-accent/50 hover:text-accent',
+              )}
+            >
+              Chat with zone
+            </button>
+          )}
+          <span className="font-mono text-[9px] uppercase tracking-wider text-accent">
+            View in log →
+          </span>
+        </div>
       </div>
 
       <div className="mb-3 grid grid-cols-3 gap-3">

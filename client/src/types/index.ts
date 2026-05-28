@@ -199,3 +199,32 @@ export interface WellStats {
   avg_porosity_pct: number
   avg_sw_pct: number
 }
+
+export type AssistantContextType = 'zone' | 'interval'
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ProposedZone {
+  zone_type: 'OIL' | 'GAS'
+  top_ft: number
+  bot_ft: number
+  rationale: string
+  confidence?: 'high' | 'medium' | 'low' | null
+}
+
+export interface AssistantReply {
+  reply: string
+  proposed_zone?: ProposedZone | null
+  error?: string | null
+  disclaimer?: string | null
+  generated_at?: string | null
+  model?: string | null
+}
+
+export interface DepthInterval {
+  top_ft: number
+  bot_ft: number
+}

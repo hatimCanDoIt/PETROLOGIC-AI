@@ -91,3 +91,52 @@ class WellStatsResponse(BaseModel):
     total_hc_zones: int
     avg_porosity_pct: float
     avg_sw_pct: float
+
+
+class ChatMessageIn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class AssistantExplainRequest(BaseModel):
+    """Initial explain for an existing zone or a depth interval."""
+
+    context_type: Literal["zone", "interval"]
+    zone_id: Optional[str] = None
+    top_ft: Optional[float] = None
+    bot_ft: Optional[float] = None
+
+
+class AssistantChatRequest(BaseModel):
+    """Follow-up message in an assistant thread."""
+
+    context_type: Literal["zone", "interval"]
+    zone_id: Optional[str] = None
+    top_ft: Optional[float] = None
+    bot_ft: Optional[float] = None
+    messages: List[ChatMessageIn] = Field(min_length=1)
+
+
+class ProposedZoneOut(BaseModel):
+    zone_type: Literal["OIL", "GAS"]
+    top_ft: float
+    bot_ft: float
+    rationale: str
+    confidence: Optional[Literal["high", "medium", "low"]] = None
+
+
+class AssistantReply(BaseModel):
+    reply: str
+    proposed_zone: Optional[ProposedZoneOut] = None
+    error: Optional[str] = None
+    disclaimer: Optional[str] = None
+    generated_at: Optional[str] = None
+    model: Optional[str] = None
+
+
+class AddZoneRequest(BaseModel):
+    zone_type: Literal["OIL", "GAS"]
+    top_ft: float
+    bot_ft: float
+    ai_rationale: Optional[str] = Field(default=None, max_length=4000)
+    ai_confidence: Optional[Literal["high", "medium", "low"]] = None
