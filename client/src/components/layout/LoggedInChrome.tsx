@@ -17,7 +17,7 @@ export default function LoggedInChrome({
   children,
 }: LoggedInChromeProps) {
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen flex-col md:flex-row">
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
         <TopBar title={title} subtitle={subtitle} right={topRight} />

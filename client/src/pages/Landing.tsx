@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
 import LandingTour from '@/components/landing/LandingTour'
 import Logo from '@/components/layout/Logo'
+import { REQUEST_ACCESS_MAILTO } from '@/utils/requestAccess'
 
 const FEATURES = [
   {
@@ -23,6 +25,7 @@ const FEATURES = [
 ]
 
 export default function Landing() {
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
     <div className="relative min-h-screen overflow-hidden">
       <div
@@ -54,35 +57,82 @@ export default function Landing() {
         {`@keyframes gridfade { 0%,100% { opacity: 0.55 } 50% { opacity: 0.95 } }`}
       </style>
 
-      <header className="relative z-10 flex items-center justify-between px-8 py-6">
-        <Logo size={32} />
-        <nav
-          data-tour="nav-features"
-          className="hidden md:flex items-center gap-6 font-mono text-xs uppercase tracking-widest text-text-dim"
-        >
-          <a href="#features" className="hover:text-accent transition-colors">
-            Features
-          </a>
-          <a href="#methodology" className="hover:text-accent transition-colors">
-            Methodology
-          </a>
-          <Link to="/login" className="hover:text-accent transition-colors">
-            Sign in
-          </Link>
-        </nav>
+      <header className="relative z-20 px-6 py-6 md:px-8">
+        <div className="flex items-center justify-between">
+          <Logo size={32} />
+          <nav
+            data-tour="nav-features"
+            className="hidden md:flex items-center gap-6 text-xs font-medium uppercase tracking-widest text-text-dim"
+          >
+            <a href="#features" className="hover:text-accent transition-colors">
+              Features
+            </a>
+            <a href="#methodology" className="hover:text-accent transition-colors">
+              Methodology
+            </a>
+            <Link to="/login" className="hover:text-accent transition-colors">
+              Sign in
+            </Link>
+            <a href={REQUEST_ACCESS_MAILTO} className="hover:text-accent transition-colors">
+              Request access
+            </a>
+          </nav>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+            aria-controls="landing-mobile-menu"
+            className="md:hidden rounded-md p-2 text-text-dim transition-colors hover:bg-bg-deep hover:text-text"
+          >
+            {menuOpen ? (
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3 6h18M3 12h18M3 18h18" />
+              </svg>
+            )}
+          </button>
+        </div>
+        {menuOpen && (
+          <nav
+            id="landing-mobile-menu"
+            className="md:hidden mt-4 flex flex-col gap-1 rounded-lg border border-border bg-bg-panel p-2 text-xs font-medium uppercase tracking-widest text-text-dim shadow-lg"
+          >
+            <a
+              href="#features"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-3 py-2.5 transition-colors hover:bg-bg-deep hover:text-accent"
+            >
+              Features
+            </a>
+            <a
+              href="#methodology"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-3 py-2.5 transition-colors hover:bg-bg-deep hover:text-accent"
+            >
+              Methodology
+            </a>
+            <Link
+              to="/login"
+              className="rounded-md px-3 py-2.5 transition-colors hover:bg-bg-deep hover:text-accent"
+            >
+              Sign in
+            </Link>
+            <a
+              href={REQUEST_ACCESS_MAILTO}
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-3 py-2.5 transition-colors hover:bg-bg-deep hover:text-accent"
+            >
+              Request access
+            </a>
+          </nav>
+        )}
       </header>
 
       <main className="relative z-10 mx-auto flex max-w-6xl flex-col items-center px-6 py-16 text-center">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="inline-flex items-center gap-2 rounded-full border border-border surface-column-muted px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-text-dim"
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-reservoir animate-pulse" />
-          Built for the energy industry
-        </motion.div>
-
         <motion.h1
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
@@ -117,12 +167,12 @@ export default function Landing() {
             transition={{ duration: 0.7, delay: 0.25 }}
             className="mt-10 flex flex-col sm:flex-row items-center gap-3"
           >
-            <Link
-              to="/register"
+            <a
+              href={REQUEST_ACCESS_MAILTO}
               className="inline-flex h-12 items-center justify-center rounded-md bg-accent px-7 font-semibold tracking-wider text-white shadow-glow-accent transition-all hover:bg-accent-dim"
             >
-              Start Free
-            </Link>
+              Request Access
+            </a>
             <Link
               to="/login"
               className="inline-flex h-12 items-center justify-center rounded-md border border-accent bg-transparent px-7 font-semibold tracking-wider text-accent transition-all hover:bg-accent/10"
@@ -165,7 +215,7 @@ export default function Landing() {
           className="mt-24 w-full panel p-8 text-left"
         >
           <h2 className="font-display text-xl uppercase tracking-widest text-accent">How it works</h2>
-          <ol className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 font-mono text-xs uppercase tracking-widest text-text-dim">
+          <ol className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 text-xs font-semibold uppercase tracking-widest text-text-dim">
             <li>
               <span className="text-accent">01 ·</span> Upload LAS file
             </li>
@@ -183,9 +233,8 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-border mt-16 px-6 py-6 text-center text-xs text-text-dim font-mono">
-        PETROLOGIC AI &middot; Built for the energy industry &middot; Results require validation by a
-        licensed petrophysicist
+      <footer className="relative z-10 border-t border-border mt-16 px-6 py-6 text-center text-xs text-text-dim">
+        PETROLOGIC AI &middot; {new Date().getFullYear()}
       </footer>
 
       <LandingTour />

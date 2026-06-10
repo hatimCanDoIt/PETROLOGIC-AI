@@ -33,7 +33,7 @@ export default function AuthShell({
       <div className="relative z-10 w-full max-w-[400px]">
         <div className="flex flex-col items-center mb-8">
           <Logo size={36} />
-          <p className="mt-3 text-[10px] uppercase tracking-[0.35em] text-text-dim font-mono">
+          <p className="mt-3 text-[10px] font-medium uppercase tracking-[0.35em] text-text-dim">
             Petrophysical · Well · Log · Analysis
           </p>
         </div>
@@ -47,7 +47,7 @@ export default function AuthShell({
           <div className="mt-6">{children}</div>
         </div>
         {footer && (
-          <div className="mt-6 text-center text-xs text-text-dim font-mono">
+          <div className="mt-6 text-center text-xs text-text-dim">
             {footer}
           </div>
         )}

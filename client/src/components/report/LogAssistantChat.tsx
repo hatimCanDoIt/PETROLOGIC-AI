@@ -96,7 +96,7 @@ export default function LogAssistantChat({
     <div className="flex min-h-0 flex-col rounded-lg border border-accent/30 bg-bg-deep/95 shadow-lg">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-muted px-3 py-2">
         <div className="min-w-0">
-          <p className="font-mono text-[9px] uppercase tracking-widest text-accent">AI assistant</p>
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-accent">AI assistant</p>
           <p className="truncate font-display text-sm text-text-bright">{contextTitle(context, zone)}</p>
         </div>
         <button
@@ -142,7 +142,7 @@ export default function LogAssistantChat({
 
       {proposed && onAddZone && (
         <div className="shrink-0 border-t border-border-muted bg-bg-panel/80 px-3 py-2.5">
-          <p className="font-mono text-[9px] uppercase tracking-widest text-text-dim mb-1.5">
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-text-dim mb-1.5">
             Suggested pay zone
           </p>
           <p className="text-xs text-text mb-2">{proposed.rationale}</p>

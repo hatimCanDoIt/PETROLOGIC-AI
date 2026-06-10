@@ -8,6 +8,7 @@
     --c-bg: #ffffff;
     --c-panel: #fafafa;
     --c-deep: #f4f4f5;
+    --c-elevated: #ececee;
     --c-border: #e4e4e7;
     --c-border-light: #d4d4d8;
     --c-text: #18181b;
@@ -40,6 +41,7 @@
     --c-bg: #09090b;
     --c-panel: #18181b;
     --c-deep: #27272a;
+    --c-elevated: #2e2e33;
     --c-border: #3f3f46;
     --c-border-light: #52525b;
     --c-text: #e4e4e7;
@@ -77,10 +79,13 @@
   body {
     background-color: var(--c-bg);
     color: var(--c-text);
-    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-family: 'Inter', system-ui, sans-serif;
     font-size: 15px;
+    /* Inter contextual alternates + open digits for a crisper UI voice */
+    font-feature-settings: 'calt' 1, 'cv05' 1, 'cv11' 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
     position: relative;
     overflow-x: hidden;
   }
@@ -114,6 +119,17 @@
   input[type='number'] {
     appearance: textfield;
     -moz-appearance: textfield;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -157,6 +173,37 @@
 }
 
 @layer components {
+  /* Display text defaults to a confident weight; explicit font-weight
+     utilities (later in the cascade) still override this. */
+  .font-display {
+    font-weight: 600;
+  }
+
+  .toast-enter {
+    animation: toast-in 0.18s ease-out;
+  }
+  .drawer-enter {
+    animation: drawer-in 0.2s ease-out;
+  }
+  @keyframes drawer-in {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   .panel {
     background-color: var(--c-panel);
     border: 1px solid var(--c-border);
@@ -200,7 +247,7 @@
 }
 
 #tooltip {
-  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.75rem;
   background: var(--c-tooltip-bg);
   backdrop-filter: blur(12px);

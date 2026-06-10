@@ -18,11 +18,21 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+export const SESSION_EXPIRED_KEY = 'petrologic:sessionExpired'
+
 api.interceptors.response.use(
   (r) => r,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid — purge auth state
+      // Token expired or invalid — purge auth state. ProtectedRoute will then
+      // redirect to /login, where the flag below surfaces a friendly notice.
+      if (useAuthStore.getState().token) {
+        try {
+          sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
+        } catch {
+          /* private mode */
+        }
+      }
       useAuthStore.getState().logout()
     }
     return Promise.reject(error)

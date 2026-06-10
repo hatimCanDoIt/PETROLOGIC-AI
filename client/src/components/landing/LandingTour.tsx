@@ -32,8 +32,8 @@ const STEPS: Step[] = [
   },
   {
     id: 'cta',
-    title: 'Register or sign in',
-    body: 'Create an account to upload LAS files to your private dashboard. Signing in resumes where you left off.',
+    title: 'Request access or sign in',
+    body: 'PETROLOGIC AI is sales-led: request access to schedule a demo for your team. Existing users sign in to resume where they left off.',
     targetSelector: '[data-tour="cta-register"]',
   },
   {
@@ -237,7 +237,7 @@ export default function LandingTour() {
             aria-modal="true"
             aria-labelledby={`tour-title-${step.id}`}
           >
-            <p className="text-[10px] font-mono uppercase tracking-widest text-accent">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-accent">
               {stepIdx + 1}/{STEPS.length}
             </p>
             <h2

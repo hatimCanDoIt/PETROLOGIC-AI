@@ -1305,7 +1305,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     <div ref={layoutHostRef} className="relative h-full flex flex-col min-h-0 min-w-0">
       <div className="flex min-h-10 shrink-0 items-center gap-x-4 border-b border-border surface-header-bar px-[clamp(0.5rem,4vw,1rem)]">
         <div className="flex min-w-0 shrink-0 items-center gap-x-4">
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-text-dim">
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-widest text-text-dim">
             Zoom
           </span>
           <div className="panel flex shrink-0 items-center gap-0.5 px-1 py-0.5 text-text-dim">
@@ -1314,6 +1314,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               onClick={() => sync.setZoom(sync.zoomFactor / 1.25)}
               className="px-2 leading-none hover:text-accent"
               title="Zoom out (Ctrl+wheel)"
+              aria-label="Zoom out"
             >
               −
             </button>
@@ -1325,6 +1326,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               onClick={() => sync.setZoom(sync.zoomFactor * 1.25)}
               className="px-2 leading-none hover:text-accent"
               title="Zoom in (Ctrl+wheel)"
+              aria-label="Zoom in"
             >
               +
             </button>
@@ -1333,6 +1335,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               onClick={() => sync.setZoom(1)}
               className="border-l border-border-muted px-2 font-mono text-[10px] hover:text-accent"
               title="Reset zoom"
+              aria-label="Reset zoom to 1:1"
             >
               1:1
             </button>
@@ -1356,7 +1359,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
             </label>
           ))}
           {visibleTracks.length === 0 && (
-            <span className="shrink-0 font-mono text-[10px] text-oil whitespace-nowrap">
+            <span className="shrink-0 text-[10px] font-medium text-oil whitespace-nowrap">
               No tracks selected
             </span>
           )}

@@ -230,7 +230,7 @@ export default function NDCrossplot({
             <h2 className="font-display text-sm uppercase tracking-widest text-text-bright">
               Neutron–Density crossplot
             </h2>
-            <p className="mt-1 font-mono text-[10px] text-text-dim leading-snug max-w-xl">
+            <p className="mt-1 text-[10px] text-text-dim leading-snug max-w-xl">
               Filter to a pay depth window — gas crossover pulls points upper-left. More plot types
               (Pickett, Buckles, Rt–Rxo) coming here.
             </p>
@@ -241,11 +241,11 @@ export default function NDCrossplot({
         </div>
 
         <div className="mt-4 space-y-3">
-          <p className="font-mono text-[9px] uppercase tracking-widest text-text-dim">
+          <p className="text-[9px] font-semibold uppercase tracking-widest text-text-dim">
             Depth window (ft)
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 font-mono text-[10px] text-text-dim">
+            <label className="flex items-center gap-1.5 text-[10px] font-medium text-text-dim">
               Top
               <input
                 type="number"
@@ -258,7 +258,7 @@ export default function NDCrossplot({
               />
             </label>
             <span className="text-text-dim">–</span>
-            <label className="flex items-center gap-1.5 font-mono text-[10px] text-text-dim">
+            <label className="flex items-center gap-1.5 text-[10px] font-medium text-text-dim">
               Bottom
               <input
                 type="number"
@@ -273,14 +273,14 @@ export default function NDCrossplot({
             <button
               type="button"
               onClick={commitDraftInputs}
-              className="rounded border border-border-muted px-2 py-1 font-mono text-[10px] text-text-bright hover:border-accent/50 hover:text-accent"
+              className="rounded border border-border-muted px-2 py-1 text-[10px] font-medium text-text-bright hover:border-accent/50 hover:text-accent"
             >
               Apply
             </button>
             <button
               type="button"
               onClick={() => applyDepthWindow(depthBounds.min, depthBounds.max)}
-              className="rounded border border-border-muted px-2 py-1 font-mono text-[10px] text-text-dim hover:text-text-bright"
+              className="rounded border border-border-muted px-2 py-1 text-[10px] font-medium text-text-dim hover:text-text-bright"
             >
               Full well
             </button>
@@ -347,7 +347,7 @@ export default function NDCrossplot({
             <button
               type="button"
               onClick={() => onViewZoneInLogs(activeZone.id)}
-              className="font-mono text-[10px] text-accent hover:underline"
+              className="text-[10px] font-medium text-accent hover:underline"
             >
               View {activeZone.zone_type} zone interpretation in log view →
             </button>
@@ -358,7 +358,7 @@ export default function NDCrossplot({
       {/* Chart — below controls in the same scroll flow */}
       <div className="panel shrink-0 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="font-mono text-[9px] uppercase tracking-widest text-text-dim">
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-text-dim">
             Chart height
           </span>
           <div className="flex items-center gap-2">
@@ -380,7 +380,7 @@ export default function NDCrossplot({
 
         {windowPoints.length === 0 ? (
           <div
-            className="flex items-center justify-center font-mono text-sm text-text-dim"
+            className="flex items-center justify-center text-sm text-text-dim"
             style={{ height: chartHeight }}
           >
             No samples in this depth window — widen the range or pick a zone chip.
@@ -394,7 +394,7 @@ export default function NDCrossplot({
                   type="number"
                   dataKey="x"
                   domain={[0, 60]}
-                  tick={{ fill: palette.textDim, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+                  tick={{ fill: palette.textDim, fontSize: 11, fontFamily: 'JetBrains Mono' }}
                   stroke={palette.border}
                 >
                   <Label
@@ -408,7 +408,7 @@ export default function NDCrossplot({
                   type="number"
                   dataKey="y"
                   domain={[-10, 50]}
-                  tick={{ fill: palette.textDim, fontSize: 11, fontFamily: 'IBM Plex Mono' }}
+                  tick={{ fill: palette.textDim, fontSize: 11, fontFamily: 'JetBrains Mono' }}
                   stroke={palette.border}
                 >
                   <Label
@@ -424,7 +424,7 @@ export default function NDCrossplot({
                   contentStyle={{
                     background: palette.bgPanel,
                     border: `1px solid ${palette.border}`,
-                    fontFamily: 'IBM Plex Sans',
+                    fontFamily: 'Inter',
                     fontSize: 11,
                     color: palette.text,
                   }}
@@ -441,7 +441,7 @@ export default function NDCrossplot({
                   verticalAlign="bottom"
                   align="center"
                   wrapperStyle={{
-                    fontFamily: 'IBM Plex Mono',
+                    fontFamily: 'Inter',
                     fontSize: 11,
                     color: palette.textDim,
                     paddingTop: 8,
@@ -502,7 +502,7 @@ export default function NDCrossplot({
           </div>
         )}
 
-        <p className="mt-3 font-mono text-[10px] text-text-dim">
+        <p className="mt-3 text-[10px] text-text-dim">
           {depthTop.toFixed(0)}–{depthBot.toFixed(0)} ft · Upper-left = gas crossover · Scroll down
           past the controls to view the full chart · Drag chart height to resize
         </p>

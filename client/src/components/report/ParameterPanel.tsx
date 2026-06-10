@@ -30,7 +30,7 @@ function Slider({ label, value, onChange, min, max, step = 0.01, format, unit, l
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <label className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+        <label className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
           {label}
         </label>
         <span className="font-mono text-xs text-text-bright">
@@ -48,7 +48,7 @@ function Slider({ label, value, onChange, min, max, step = 0.01, format, unit, l
         className="w-full accent-accent"
       />
       {logDisplay && (
-        <p className="font-mono text-[9px] text-text-faint">
+        <p className="text-[9px] text-text-faint">
           log scale display · linear control
         </p>
       )}
@@ -124,7 +124,7 @@ function AutoField({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <label className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+        <label className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
           {label}
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -134,7 +134,7 @@ function AutoField({
             onChange={(e) => onAutoChange(e.target.checked)}
             className="accent-accent"
           />
-          <span className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
             auto
           </span>
         </label>
@@ -156,7 +156,7 @@ function AutoField({
         )}
       </div>
       {auto && resolvedValue != null && Number.isFinite(resolvedValue) && (
-        <p className="font-mono text-[9px] text-accent/80">
+        <p className="text-[9px] text-accent/80">
           auto-estimated: {resolvedValue.toFixed(3)}
           {unit ? ` ${unit}` : ''}
         </p>

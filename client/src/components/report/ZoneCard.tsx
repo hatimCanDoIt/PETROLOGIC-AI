@@ -19,7 +19,7 @@ interface ZoneCardProps {
 function metric(label: string, value: string, color?: string) {
   return (
     <div className="flex flex-col">
-      <span className="font-mono text-[9px] uppercase tracking-widest text-text-dim">
+      <span className="text-[9px] font-semibold uppercase tracking-widest text-text-dim">
         {label}
       </span>
       <span
@@ -42,19 +42,19 @@ function ZoneAiNarrative({ z }: { z: AIZoneInterpretation }) {
   return (
     <div className="mt-3 space-y-3 border-t border-border-muted pt-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[9px] uppercase tracking-widest text-text-dim">AI interpretation</span>
+        <span className="text-[9px] font-semibold uppercase tracking-widest text-text-dim">AI interpretation</span>
         <Badge tone={confTone}>{z.fluid_type_confidence}</Badge>
       </div>
       <p className="text-sm text-text leading-relaxed">{z.interpretation}</p>
       {z.producibility_assessment && (
         <p className="text-sm text-text-bright">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-text-dim mr-2">Producibility</span>
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-text-dim mr-2">Producibility</span>
           {z.producibility_assessment}
         </p>
       )}
       {z.concerns?.length > 0 && (
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-widest text-oil mb-1">Concerns</p>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-oil mb-1">Concerns</p>
           <ul className="list-disc list-inside text-xs text-text space-y-0.5">
             {z.concerns.map((c, i) => (
               <li key={i}>{c}</li>
@@ -64,7 +64,7 @@ function ZoneAiNarrative({ z }: { z: AIZoneInterpretation }) {
       )}
       {z.recommended_actions?.length > 0 && (
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-widest text-accent mb-1">Recommended</p>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-accent mb-1">Recommended</p>
           <ul className="list-disc list-inside text-xs text-text space-y-0.5">
             {z.recommended_actions.map((c, i) => (
               <li key={i}>{c}</li>
@@ -137,7 +137,7 @@ export default function ZoneCard({
                 onChat(zone)
               }}
               className={clsx(
-                'rounded border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider transition-colors',
+                'rounded border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider transition-colors',
                 chatActive
                   ? 'border-accent bg-accent/15 text-accent'
                   : 'border-border-muted text-text-dim hover:border-accent/50 hover:text-accent',
@@ -146,7 +146,7 @@ export default function ZoneCard({
               Chat with zone
             </button>
           )}
-          <span className="font-mono text-[9px] uppercase tracking-wider text-accent">
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-accent">
             View in log →
           </span>
         </div>
@@ -167,7 +167,7 @@ export default function ZoneCard({
       {/* Producibility bar */}
       <div>
         <div className="mb-1 flex items-center justify-between">
-          <span className="font-mono text-[9px] uppercase tracking-widest text-text-dim">
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-text-dim">
             Producibility
           </span>
           <span className="font-mono text-[10px] text-text-bright">
@@ -189,10 +189,10 @@ export default function ZoneCard({
 
       {zone.ai_rationale && (
         <div className="mt-3 border-t border-border-muted pt-3">
-          <span className="font-mono text-[9px] uppercase tracking-widest text-text-dim">Zone pick rationale</span>
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-text-dim">Zone pick rationale</span>
           <p className="mt-1 text-sm leading-relaxed text-text">{zone.ai_rationale}</p>
           {zone.ai_confidence && (
-            <p className="mt-2 font-mono text-[10px] text-text-dim">
+            <p className="mt-2 text-[10px] text-text-dim">
               Confidence: {zone.ai_confidence}
             </p>
           )}

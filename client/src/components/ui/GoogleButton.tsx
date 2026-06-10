@@ -8,7 +8,7 @@ export default function GoogleButton({ label }: { label: string }) {
     <button
       type="button"
       onClick={onClick}
-      className="w-full inline-flex items-center justify-center gap-3 h-11 rounded-md bg-white text-gray-800 font-medium hover:bg-gray-100 transition-colors"
+      className="w-full inline-flex items-center justify-center gap-3 h-11 rounded-md border border-border bg-bg-panel text-text font-medium hover:bg-bg-deep hover:border-border-light transition-colors"
     >
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
         <path

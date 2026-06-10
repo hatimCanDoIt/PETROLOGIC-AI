@@ -1,0 +1,5 @@
+# Local override: avoid conflict with system PostgreSQL on 5432
+services:
+  db:
+    ports:
+      - "5433:5432"

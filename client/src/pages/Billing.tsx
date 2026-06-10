@@ -62,7 +62,7 @@ export default function Billing() {
       topRight={
         <Link
           to="/subscription"
-          className="text-xs font-mono uppercase tracking-widest text-accent hover:underline"
+          className="text-xs font-semibold uppercase tracking-widest text-accent hover:underline"
         >
           Change plan
         </Link>
@@ -78,15 +78,34 @@ export default function Billing() {
       )}
 
       {me.isLoading ? (
-        <p className="text-text-dim font-mono text-sm">Loading billing profile…</p>
+        <div className="grid gap-6 lg:grid-cols-2" aria-busy="true" aria-label="Loading billing profile">
+          {[0, 1].map((i) => (
+            <Card key={i}>
+              <div className="space-y-3">
+                <div className="h-4 w-2/5 animate-pulse rounded bg-bg-elevated" />
+                <div className="h-3 w-4/5 animate-pulse rounded bg-bg-elevated" />
+                <div className="h-3 w-3/5 animate-pulse rounded bg-bg-elevated" />
+                <div className="h-3 w-1/2 animate-pulse rounded bg-bg-elevated" />
+              </div>
+            </Card>
+          ))}
+        </div>
       ) : me.isError ? (
-        <p className="text-gas font-mono text-sm">Could not load your account.</p>
+        <div role="alert">
+          <p className="text-gas text-sm">Could not load your account.</p>
+          <button
+            onClick={() => me.refetch()}
+            className="mt-2 text-sm text-accent underline hover:text-accent-dim"
+          >
+            Try again
+          </button>
+        </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title="Current plan" subtitle="Updated after Stripe subscription events sync.">
             <dl className="space-y-3 text-sm">
               <div>
-                <dt className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                <dt className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                   Plan
                 </dt>
                 <dd className="text-text-bright font-medium">
@@ -96,7 +115,7 @@ export default function Billing() {
                 </dd>
               </div>
               <div>
-                <dt className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                <dt className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                   Subscription status
                 </dt>
                 <dd className="text-text-bright capitalize">
@@ -104,7 +123,7 @@ export default function Billing() {
                 </dd>
               </div>
               <div>
-                <dt className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                <dt className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                   Seats
                 </dt>
                 <dd className="text-text-dim">
@@ -130,11 +149,11 @@ export default function Billing() {
             }
           >
             <p className="text-sm text-text-dim">
-              After your first Checkout, this opens Stripe&apos;s portal. Until then expect a polite
-              400 from the API — add keys and subscribe when ready.
+              Manage payment methods, invoices, and renewals in Stripe&apos;s secure portal. Available
+              once you have an active subscription.
             </p>
             {portalErr && (
-              <p className="mt-3 text-xs text-gas font-mono" role="alert">
+              <p className="mt-3 text-xs text-gas" role="alert">
                 {portalErr}
               </p>
             )}
@@ -142,16 +161,18 @@ export default function Billing() {
         </div>
       )}
 
-      <Card title="Production checklist" className="max-w-3xl">
-        <ul className="list-disc list-inside space-y-2 text-xs text-text-dim font-mono leading-relaxed">
-          <li>
-            Set <code className="text-accent">STRIPE_SECRET_KEY</code>, price IDs, and expose{' '}
-            <code className="text-accent">POST /api/billing/webhook</code> in the Stripe dashboard.
-          </li>
-          <li>Enable Customer Portal branding and return URLs in Stripe.</li>
-          <li>Enterprise stays on email — procurement handles contracts offline.</li>
-        </ul>
-      </Card>
+      {import.meta.env.DEV && (
+        <Card title="Production checklist (dev only)" className="max-w-3xl">
+          <ul className="list-disc list-inside space-y-2 text-xs text-text-dim font-mono leading-relaxed">
+            <li>
+              Set <code className="text-accent">STRIPE_SECRET_KEY</code>, price IDs, and expose{' '}
+              <code className="text-accent">POST /api/billing/webhook</code> in the Stripe dashboard.
+            </li>
+            <li>Enable Customer Portal branding and return URLs in Stripe.</li>
+            <li>Enterprise stays on email — procurement handles contracts offline.</li>
+          </ul>
+        </Card>
+      )}
     </LoggedInChrome>
   )
 }

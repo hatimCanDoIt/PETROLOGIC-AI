@@ -9,27 +9,11 @@ import Spinner from '@/components/ui/Spinner'
 import { useUploadWell } from '@/hooks/useWell'
 import type { AnalysisMode } from '@/types'
 
-type Stage = 'idle' | 'parsing' | 'petro' | 'ai' | 'done'
+type Stage = 'idle' | 'uploading' | 'analyzing' | 'done'
 
-const STAGE_LABEL: Record<Stage, string> = {
-  idle: 'Analyze Well',
-  parsing: 'Parsing LAS…',
-  petro: 'Running Petrophysics…',
-  ai: 'Getting AI Interpretation…',
-  done: 'Done',
-}
-
-const STAGE_ORDER: Stage[] = ['parsing', 'petro', 'ai', 'done']
-
-const MODE_LABEL_BY_STAGE: Record<AnalysisMode, Record<Stage, string>> = {
-  deterministic: STAGE_LABEL,
-  llm: {
-    idle: 'Analyze Well',
-    parsing: 'Parsing LAS…',
-    petro: 'Computing Curves…',
-    ai: 'Sonnet Picking Zones…',
-    done: 'Done',
-  },
+const ANALYZING_LABEL: Record<AnalysisMode, string> = {
+  deterministic: 'Running petrophysics + AI interpretation…',
+  llm: 'Computing curves, Sonnet picking zones…',
 }
 
 const MODE_OPTIONS: { value: AnalysisMode; title: string; blurb: string }[] = [
@@ -61,6 +45,7 @@ export default function UploadZone() {
   const [n, setN] = useState<string>('2.0')
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('deterministic')
   const [stage, setStage] = useState<Stage>('idle')
+  const [uploadPct, setUploadPct] = useState(0)
 
   const onDrop = useCallback((accepted: File[]) => {
     setError(null)
@@ -85,20 +70,8 @@ export default function UploadZone() {
   const submit = async () => {
     if (!file) return
     setError(null)
-    setStage('parsing')
-
-    // Drive the progress label forward as we wait for the server. The actual
-    // server work is sequential so we just show the next label after a short
-    // delay so the user sees motion.
-    const advance = () => {
-      setStage((s) => {
-        const idx = STAGE_ORDER.indexOf(s)
-        if (idx < 0 || idx === STAGE_ORDER.length - 1) return s
-        return STAGE_ORDER[idx + 1]
-      })
-    }
-    const t1 = setTimeout(advance, 800)
-    const t2 = setTimeout(advance, 2200)
+    setStage('uploading')
+    setUploadPct(0)
 
     try {
       const result = await upload.mutateAsync({
@@ -109,17 +82,27 @@ export default function UploadZone() {
         m: numOrUndef(m),
         n: numOrUndef(n),
         analysis_mode: analysisMode,
+        onUploadProgress: (pct) => {
+          setUploadPct(pct)
+          // Bytes are on the server — the rest of the wait is analysis.
+          if (pct >= 100) setStage('analyzing')
+        },
       })
       setStage('done')
       navigate(`/report/${result.id}`)
     } catch (err) {
       setStage('idle')
       setError(err instanceof Error ? err.message : 'Upload failed.')
-    } finally {
-      clearTimeout(t1)
-      clearTimeout(t2)
     }
   }
+
+  const busy = stage === 'uploading' || stage === 'analyzing'
+  const statusLabel =
+    stage === 'uploading'
+      ? `Uploading… ${uploadPct}%`
+      : stage === 'analyzing'
+        ? ANALYZING_LABEL[analysisMode]
+        : ''
 
   return (
     <div className="panel p-6">
@@ -134,7 +117,7 @@ export default function UploadZone() {
         </div>
         <button
           onClick={() => setShowAdvanced((v) => !v)}
-          className="font-mono text-[10px] uppercase tracking-widest text-text-dim hover:text-accent transition-colors"
+          className="text-[10px] font-semibold uppercase tracking-widest text-text-dim hover:text-accent transition-colors"
         >
           {showAdvanced ? 'Hide' : 'Show'} Advanced Parameters
         </button>
@@ -166,7 +149,7 @@ export default function UploadZone() {
       </div>
 
       <div className="mt-5">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-text-dim mb-2">
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-text-dim mb-2">
           Analysis method
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -200,7 +183,7 @@ export default function UploadZone() {
                         : 'border-border',
                     )}
                   />
-                  <span className="font-mono text-[11px] uppercase tracking-wider text-text-bright">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-text-bright">
                     {opt.title}
                   </span>
                 </div>
@@ -238,25 +221,32 @@ export default function UploadZone() {
       )}
 
       {error && (
-        <p role="alert" className="mt-4 text-sm font-mono text-gas">
+        <p role="alert" className="mt-4 text-sm text-gas">
           {error}
         </p>
       )}
 
-      <div className="mt-5 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs font-mono text-text-dim">
-          {stage !== 'idle' && stage !== 'done' && <Spinner size={12} />}
-          <span>{MODE_LABEL_BY_STAGE[analysisMode][stage]}</span>
+      {busy && (
+        <div className="mt-5" role="status" aria-live="polite">
+          <div className="flex items-center gap-2 text-xs text-text-dim tabular-nums">
+            <Spinner size={12} />
+            <span>{statusLabel}</span>
+          </div>
+          <div className="mt-2 h-1 overflow-hidden rounded-full bg-bg-elevated">
+            <div
+              className={clsx(
+                'h-full rounded-full bg-accent transition-all duration-200',
+                stage === 'analyzing' && 'animate-pulse',
+              )}
+              style={{ width: stage === 'uploading' ? `${uploadPct}%` : '100%' }}
+            />
+          </div>
         </div>
-        <Button
-          disabled={!file || (stage !== 'idle' && stage !== 'done')}
-          loading={stage !== 'idle' && stage !== 'done'}
-          onClick={submit}
-          size="lg"
-        >
-          {stage === 'idle' || stage === 'done'
-            ? 'Analyze Well'
-            : MODE_LABEL_BY_STAGE[analysisMode][stage]}
+      )}
+
+      <div className="mt-5 flex items-center justify-end">
+        <Button disabled={!file || busy} loading={busy} onClick={submit} size="lg">
+          {busy ? statusLabel : 'Analyze Well'}
         </Button>
       </div>
     </div>

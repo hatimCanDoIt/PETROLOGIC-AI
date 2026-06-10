@@ -35,7 +35,7 @@ export default function Card({
               </h3>
             )}
             {subtitle && (
-              <p className="text-text-dim text-xs mt-1 font-mono">{subtitle}</p>
+              <p className="text-text-dim text-xs mt-1">{subtitle}</p>
             )}
           </div>
           {action}

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
+import { useToast } from '@/components/ui/Toast'
 import { downloadWellExport } from '@/hooks/useWell'
 
 interface ExportButtonProps {
@@ -10,6 +11,7 @@ interface ExportButtonProps {
 }
 
 export default function ExportButton({ wellId, wellName, logDate }: ExportButtonProps) {
+  const toast = useToast()
   const [loading, setLoading] = useState(false)
   const onClick = async () => {
     setLoading(true)
@@ -17,8 +19,9 @@ export default function ExportButton({ wellId, wellName, logDate }: ExportButton
       const safe = wellName.replace(/[^a-z0-9_-]+/gi, '_')
       const date = logDate || 'unknown'
       await downloadWellExport(wellId, `${safe}_${date}_petrologic.csv`)
+      toast.success('CSV export downloaded.')
     } catch (err) {
-      alert('Export failed.')
+      toast.error('Export failed. Please try again.')
     } finally {
       setLoading(false)
     }

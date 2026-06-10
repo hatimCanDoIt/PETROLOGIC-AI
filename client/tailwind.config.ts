@@ -10,6 +10,7 @@ const config: Config = {
           DEFAULT: 'var(--c-bg)',
           panel: 'var(--c-panel)',
           deep: 'var(--c-deep)',
+          elevated: 'var(--c-elevated)',
         },
         border: {
           DEFAULT: 'var(--c-border)',
@@ -46,9 +47,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["'IBM Plex Sans'", 'system-ui', 'sans-serif'],
-        display: ["'IBM Plex Sans'", 'system-ui', 'sans-serif'],
-        mono: ["'IBM Plex Mono'", 'ui-monospace', 'monospace'],
+        sans: ["'Inter'", 'system-ui', 'sans-serif'],
+        display: ["'Inter'", 'system-ui', 'sans-serif'],
+        mono: ["'JetBrains Mono'", 'ui-monospace', 'monospace'],
       },
       boxShadow: {
         'glow-accent': '0 0 22px color-mix(in srgb, var(--c-accent) 22%, transparent)',

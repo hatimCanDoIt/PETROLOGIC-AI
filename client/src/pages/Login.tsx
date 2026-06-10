@@ -1,11 +1,24 @@
 import { FormEvent, useState } from 'react'
-import { Link } from 'react-router-dom'
 
 import AuthShell from '@/components/layout/AuthShell'
 import Button from '@/components/ui/Button'
 import GoogleButton from '@/components/ui/GoogleButton'
 import Input from '@/components/ui/Input'
+import { SESSION_EXPIRED_KEY } from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
+import { REQUEST_ACCESS_MAILTO } from '@/utils/requestAccess'
+
+function consumeSessionExpiredFlag(): boolean {
+  try {
+    if (sessionStorage.getItem(SESSION_EXPIRED_KEY)) {
+      sessionStorage.removeItem(SESSION_EXPIRED_KEY)
+      return true
+    }
+  } catch {
+    /* private mode */
+  }
+  return false
+}
 
 export default function Login() {
   const { login } = useAuth()
@@ -13,6 +26,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [sessionExpired] = useState(consumeSessionExpiredFlag)
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -34,15 +48,24 @@ export default function Login() {
       footer={
         <span>
           Don&apos;t have an account?{' '}
-          <Link to="/register" className="text-accent hover:underline">
-            Register
-          </Link>
+          <a href={REQUEST_ACCESS_MAILTO} className="text-accent hover:underline">
+            Request access
+          </a>
         </span>
       }
     >
+      {sessionExpired && (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-oil/40 bg-oil/10 px-3 py-2 text-xs text-text"
+        >
+          Your session expired. Please sign in again.
+        </p>
+      )}
+
       <GoogleButton label="Sign in with Google" />
 
-      <div className="my-5 flex items-center gap-3 text-text-dim font-mono text-[10px] uppercase tracking-widest">
+      <div className="my-5 flex items-center gap-3 text-text-dim text-[10px] font-medium uppercase tracking-widest">
         <span className="h-px flex-1 bg-border" />
         OR
         <span className="h-px flex-1 bg-border" />
@@ -67,7 +90,7 @@ export default function Login() {
           onChange={(e) => setPassword(e.target.value)}
         />
         {error && (
-          <p className="text-xs font-mono text-gas" role="alert">
+          <p className="text-xs text-gas" role="alert">
             {error}
           </p>
         )}

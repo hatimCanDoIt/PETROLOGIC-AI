@@ -55,6 +55,7 @@ export function useUploadWell() {
       m?: number
       n?: number
       analysis_mode?: AnalysisMode
+      onUploadProgress?: (percent: number) => void
     }) => {
       const fd = new FormData()
       fd.append('las_file', input.file)
@@ -69,6 +70,11 @@ export function useUploadWell() {
         const { data } = await api.post<WellDetail>('/api/wells/upload', fd, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 120000,
+          onUploadProgress: (e) => {
+            if (input.onUploadProgress && e.total) {
+              input.onUploadProgress(Math.round((e.loaded / e.total) * 100))
+            }
+          },
         })
         return data
       } catch (err) {

@@ -62,7 +62,7 @@ export default function DepthRuler({
     else if (zoomFactor > 2) step = 25
     else if (zoomFactor > 1.2) step = 50
 
-    ctx.font = '500 10px "IBM Plex Mono", monospace'
+    ctx.font = '500 10px "JetBrains Mono", monospace'
     ctx.textAlign = 'right'
     ctx.textBaseline = 'middle'
 
@@ -98,7 +98,7 @@ export default function DepthRuler({
       className="relative bg-bg-deep border-r border-border"
     >
       <div className="sticky top-0 z-10 surface-depth-stick border-b border-border h-[60px] flex flex-col items-center justify-center">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
           Depth
         </span>
         <span className="font-mono text-[9px] text-text-faint">ft</span>

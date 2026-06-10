@@ -61,7 +61,7 @@ export default function Register() {
     >
       <GoogleButton label="Sign up with Google" />
 
-      <div className="my-5 flex items-center gap-3 text-text-dim font-mono text-[10px] uppercase tracking-widest">
+      <div className="my-5 flex items-center gap-3 text-text-dim text-[10px] font-medium uppercase tracking-widest">
         <span className="h-px flex-1 bg-border" />
         OR
         <span className="h-px flex-1 bg-border" />
@@ -107,7 +107,7 @@ export default function Register() {
           error={fieldErrors.confirm}
         />
         {error && (
-          <p className="text-xs font-mono text-gas" role="alert">
+          <p className="text-xs text-gas" role="alert">
             {error}
           </p>
         )}

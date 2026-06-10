@@ -221,7 +221,7 @@ export default function TrackCanvas({
       ctx.setLineDash([])
 
       ctx.fillStyle = lineColor
-      ctx.font = '600 10px "IBM Plex Sans", system-ui, sans-serif'
+      ctx.font = '600 10px "Inter", system-ui, sans-serif'
       ctx.textAlign = 'left'
       ctx.textBaseline = 'bottom'
       ctx.fillText(`${z.top_ft.toFixed(0)} ft`, 4, top - 2)
@@ -291,7 +291,7 @@ export default function TrackCanvas({
       ctx.setLineDash([])
       if (ref.label && canvasTop === 0) {
         ctx.fillStyle = ref.color
-        ctx.font = '500 9px "IBM Plex Mono", monospace'
+        ctx.font = '500 9px "JetBrains Mono", monospace'
         ctx.textBaseline = 'top'
         ctx.textAlign = 'left'
         ctx.fillText(ref.label, x + 3, 4)

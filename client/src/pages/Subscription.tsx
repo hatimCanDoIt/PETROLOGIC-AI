@@ -28,10 +28,11 @@ function IntervalToggle({
       <button
         type="button"
         onClick={() => onChange(v)}
+        aria-pressed={active}
         className={
           active
-            ? 'flex-1 rounded-md border border-accent bg-accent/10 px-3 py-2 text-xs font-mono uppercase tracking-widest text-accent'
-            : 'flex-1 rounded-md border border-border px-3 py-2 text-xs font-mono uppercase tracking-widest text-text-dim hover:border-border-light hover:bg-bg-deep'
+            ? 'flex-1 rounded-md border border-accent bg-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-accent'
+            : 'flex-1 rounded-md border border-border px-3 py-2 text-xs font-semibold uppercase tracking-widest text-text-dim hover:border-border-light hover:bg-bg-deep'
         }
       >
         {label}
@@ -105,7 +106,7 @@ export default function Subscription() {
     >
       {plansQuery.isError && (
         <Card className="border-border bg-bg-deep">
-          <p className="text-sm text-text-dim font-mono">
+          <p className="text-sm text-text-dim">
             Plan catalog couldn&apos;t load from the server — showing baked-in copy instead. Billing
             still works once you add Stripe settings.
           </p>
@@ -133,14 +134,14 @@ export default function Subscription() {
       )}
 
       {billingError && (
-        <p className="text-sm text-gas font-mono" role="alert">
+        <p className="text-sm text-gas" role="alert">
           {billingError}
         </p>
       )}
 
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <IntervalToggle value={interval} onChange={setInterval} />
-        <p className="text-xs text-text-dim font-mono max-w-xl">
+        <p className="text-xs text-text-dim max-w-xl">
           Solo includes a{' '}
           <span className="text-accent">seven-day trial</span> — the trial applies to the Solo plan
           only. Team subscriptions follow the Stripe schedule confirmed at Checkout.
@@ -148,7 +149,22 @@ export default function Subscription() {
       </div>
 
       {plansQuery.isLoading && !plansQuery.data ? (
-        <p className="text-text-dim font-mono text-sm">Loading plans…</p>
+        <div className="grid gap-6 md:grid-cols-3" aria-busy="true" aria-label="Loading plans">
+          {[0, 1, 2].map((i) => (
+            <Card key={i}>
+              <div className="space-y-4">
+                <div className="h-5 w-1/3 animate-pulse rounded bg-bg-elevated" />
+                <div className="h-8 w-1/2 animate-pulse rounded bg-bg-elevated" />
+                <div className="space-y-2">
+                  <div className="h-3 w-full animate-pulse rounded bg-bg-elevated" />
+                  <div className="h-3 w-5/6 animate-pulse rounded bg-bg-elevated" />
+                  <div className="h-3 w-4/6 animate-pulse rounded bg-bg-elevated" />
+                </div>
+                <div className="h-11 w-full animate-pulse rounded-md bg-bg-elevated" />
+              </div>
+            </Card>
+          ))}
+        </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-3">
           {plans.map((plan) => {
@@ -173,7 +189,7 @@ export default function Subscription() {
               if (isTeam) {
                 return (
                   <div className="space-y-3">
-                    <label className="block text-xs font-mono uppercase tracking-widest text-text-dim">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-text-dim">
                       Seats (3–10)
                       <input
                         type="number"
@@ -234,7 +250,7 @@ export default function Subscription() {
                     <p className="font-display text-2xl text-accent leading-tight">{priceLine}</p>
                   )}
                   {plan.code === 'solo' && typeof plan.trial_days === 'number' && (
-                    <p className="text-xs font-mono text-text-dim">
+                    <p className="text-xs text-text-dim">
                       {plan.trial_days}-day complimentary access before Stripe captures the Solo
                       subscription.
                     </p>
@@ -253,7 +269,7 @@ export default function Subscription() {
       )}
 
       <Card className="max-w-2xl">
-        <p className="text-xs text-text-dim font-mono leading-relaxed">
+        <p className="text-xs text-text-dim leading-relaxed">
           After subscribing, manage cards and invoices from the{' '}
           <Link to="/billing" className="text-accent hover:underline">
             Billing

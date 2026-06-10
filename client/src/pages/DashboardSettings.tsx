@@ -48,7 +48,7 @@ export default function DashboardSettings() {
         })}
       </fieldset>
 
-      <p className="mt-4 border-t border-border pt-4 text-xs text-text-dim font-mono">
+      <p className="mt-4 border-t border-border pt-4 text-xs text-text-dim">
         Log canvases use the chosen mode so grids and lith colours stay readable.
       </p>
     </Card>

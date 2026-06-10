@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Spinner from '@/components/ui/Spinner'
@@ -23,6 +23,21 @@ export default function PdfReportModal({
   const [loading, setLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  useEffect(() => {
+    if (!open || !panelRef.current) return
+    panelRef.current.querySelector<HTMLElement>('button')?.focus()
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -57,13 +72,23 @@ export default function PdfReportModal({
       aria-modal="true"
       aria-label="Zone report preview"
     >
-      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-bg-panel shadow-2xl">
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        aria-label="Close"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div
+        ref={panelRef}
+        className="relative z-10 flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-bg-panel shadow-2xl"
+      >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-muted px-4 py-3">
           <div>
             <h2 className="font-display text-sm uppercase tracking-widest text-text-bright">
               Pay-zone report
             </h2>
-            <p className="font-mono text-[10px] text-text-dim">{wellName}</p>
+            <p className="text-[10px] text-text-dim">{wellName}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button

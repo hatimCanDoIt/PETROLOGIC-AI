@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import Sidebar from '@/components/layout/Sidebar'
@@ -6,7 +6,9 @@ import TopBar from '@/components/layout/TopBar'
 import UploadZone from '@/components/upload/UploadZone'
 import Badge from '@/components/ui/Badge'
 import Card from '@/components/ui/Card'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
+import { useToast } from '@/components/ui/Toast'
 import { useAuth } from '@/hooks/useAuth'
 import { useDeleteWell, useWellStats, useWells } from '@/hooks/useWell'
 import DashboardSettings from '@/pages/DashboardSettings'
@@ -17,11 +19,13 @@ function StatCard({
   value,
   hint,
   tone = 'accent',
+  loading = false,
 }: {
   label: string
   value: string
   hint?: string
   tone?: 'accent' | 'oil' | 'gas' | 'reservoir'
+  loading?: boolean
 }) {
   const toneColor = {
     accent: 'text-accent',
@@ -31,10 +35,14 @@ function StatCard({
   }[tone]
   return (
     <Card>
-      <p className="font-mono text-[10px] uppercase tracking-widest text-text-dim">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
         {label}
       </p>
-      <p className={`font-display text-3xl mt-2 ${toneColor}`}>{value}</p>
+      {loading ? (
+        <div className="mt-3 h-8 w-16 animate-pulse rounded bg-bg-elevated" aria-hidden />
+      ) : (
+        <p className={`font-display text-3xl mt-2 ${toneColor}`}>{value}</p>
+      )}
       {hint && <p className="text-xs text-text-dim mt-1">{hint}</p>}
     </Card>
   )
@@ -49,15 +57,27 @@ function todayString() {
   })
 }
 
-function WellRow({ well, onDelete }: { well: WellSummary; onDelete: (id: string) => void }) {
+function WellRow({
+  well,
+  deleting,
+  onDelete,
+}: {
+  well: WellSummary
+  deleting: boolean
+  onDelete: (well: WellSummary) => void
+}) {
   return (
-    <tr className="border-b border-border hover:bg-bg-deep transition-colors">
+    <tr
+      className={`border-b border-border transition-colors ${
+        deleting ? 'opacity-50 pointer-events-none' : 'hover:bg-bg-deep'
+      }`}
+    >
       <td className="py-3 px-4">
         <Link to={`/report/${well.id}`} className="text-accent font-medium hover:underline">
           {well.well_name}
         </Link>
         {well.field && (
-          <p className="text-xs text-text-dim font-mono mt-0.5">{well.field}</p>
+          <p className="text-xs text-text-dim mt-0.5">{well.field}</p>
         )}
       </td>
       <td className="py-3 px-4 font-mono text-xs text-text-dim">
@@ -75,7 +95,7 @@ function WellRow({ well, onDelete }: { well: WellSummary; onDelete: (id: string)
             <Badge tone="gas">{well.gas_zone_count} gas</Badge>
           )}
           {well.zone_count === 0 && (
-            <span className="text-xs text-text-dim font-mono">none</span>
+            <span className="text-xs text-text-dim">none</span>
           )}
         </div>
       </td>
@@ -86,8 +106,9 @@ function WellRow({ well, onDelete }: { well: WellSummary; onDelete: (id: string)
         <div className="flex items-center justify-end gap-2">
           <Link
             to={`/report/${well.id}`}
-            className="text-text-dim hover:text-accent transition-colors"
+            className="rounded p-1 text-text-dim hover:text-accent transition-colors"
             title="View report"
+            aria-label={`View report for ${well.well_name}`}
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
@@ -95,17 +116,19 @@ function WellRow({ well, onDelete }: { well: WellSummary; onDelete: (id: string)
             </svg>
           </Link>
           <button
-            onClick={() => {
-              if (confirm(`Delete well "${well.well_name}"? This cannot be undone.`)) {
-                onDelete(well.id)
-              }
-            }}
-            className="text-text-dim hover:text-gas transition-colors"
+            onClick={() => onDelete(well)}
+            disabled={deleting}
+            className="rounded p-1 text-text-dim hover:text-gas transition-colors disabled:cursor-not-allowed"
             title="Delete"
+            aria-label={`Delete well ${well.well_name}`}
           >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            </svg>
+            {deleting ? (
+              <Spinner size={14} />
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              </svg>
+            )}
           </button>
         </div>
       </td>
@@ -115,12 +138,28 @@ function WellRow({ well, onDelete }: { well: WellSummary; onDelete: (id: string)
 
 export default function Dashboard() {
   const { user, fetchMe } = useAuth()
+  const toast = useToast()
   const wells = useWells()
   const stats = useWellStats()
   const del = useDeleteWell()
   const [params] = useSearchParams()
   const tab = params.get('tab') || 'overview'
-  const wellsAnchorRef = useRef<HTMLDivElement | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<WellSummary | null>(null)
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    const name = pendingDelete.well_name
+    del.mutate(pendingDelete.id, {
+      onSuccess: () => {
+        setPendingDelete(null)
+        toast.success(`Deleted well "${name}".`)
+      },
+      onError: () => {
+        setPendingDelete(null)
+        toast.error(`Could not delete "${name}". Please try again.`)
+      },
+    })
+  }
 
   useEffect(() => {
     if (user && !user.email) {
@@ -128,13 +167,11 @@ export default function Dashboard() {
     }
   }, [user, fetchMe])
 
-  useEffect(() => {
-    if (tab !== 'wells') return
-    wellsAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [tab])
+  // "My Wells" focuses on the well list; overview shows stats + upload too.
+  const wellsOnly = tab === 'wells'
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen flex-col md:flex-row">
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
         <TopBar
@@ -148,15 +185,18 @@ export default function Dashboard() {
           ) : (
             <>
           {/* Stat row */}
+          {!wellsOnly && (
           <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard
               label="Total Wells"
               value={stats.data ? String(stats.data.total_wells) : '—'}
+              loading={stats.isLoading}
               tone="accent"
             />
             <StatCard
               label="HC Zones Found"
               value={stats.data ? String(stats.data.total_hc_zones) : '—'}
+              loading={stats.isLoading}
               tone="oil"
             />
             <StatCard
@@ -166,6 +206,8 @@ export default function Dashboard() {
                   ? `${stats.data.avg_porosity_pct.toFixed(1)}%`
                   : '—'
               }
+              loading={stats.isLoading}
+              hint={stats.data && stats.data.total_hc_zones === 0 ? 'No zones yet' : undefined}
               tone="reservoir"
             />
             <StatCard
@@ -175,22 +217,44 @@ export default function Dashboard() {
                   ? `${stats.data.avg_sw_pct.toFixed(1)}%`
                   : '—'
               }
+              loading={stats.isLoading}
+              hint={stats.data && stats.data.total_hc_zones === 0 ? 'No zones yet' : undefined}
               tone="gas"
             />
           </section>
+          )}
+          {!wellsOnly && stats.isError && (
+            <p role="alert" className="text-xs text-gas -mt-3">
+              Could not load summary stats.{' '}
+              <button onClick={() => stats.refetch()} className="underline hover:text-text">
+                Retry
+              </button>
+            </p>
+          )}
 
           {/* Upload */}
-          <UploadZone />
+          {!wellsOnly && <UploadZone />}
 
           {/* Recent wells */}
-          <div ref={wellsAnchorRef} id="recent-wells">
-          <Card title="Recent Wells" subtitle="Click a well to open its report">
+          <div id="recent-wells">
+          <Card
+            title={wellsOnly ? 'My Wells' : 'Recent Wells'}
+            subtitle="Click a well to open its report"
+          >
             {wells.isLoading ? (
               <div className="flex items-center gap-2 py-8 text-text-dim">
                 <Spinner /> Loading wells…
               </div>
             ) : wells.isError ? (
-              <p className="text-gas py-8">Could not load wells.</p>
+              <div role="alert" className="py-8 text-center">
+                <p className="text-gas">Could not load wells.</p>
+                <button
+                  onClick={() => wells.refetch()}
+                  className="mt-2 text-sm text-accent underline hover:text-accent-dim"
+                >
+                  Try again
+                </button>
+              </div>
             ) : !wells.data?.length ? (
               <div className="py-12 text-center">
                 <svg
@@ -204,29 +268,35 @@ export default function Dashboard() {
                   <path d="M14 16 Q18 22 14 28 Q10 34 14 40 L14 50" />
                 </svg>
                 <p className="mt-4 text-text-dim">No wells yet.</p>
-                <p className="text-sm text-accent mt-1">Upload your first LAS file above.</p>
+                {wellsOnly ? (
+                  <Link to="/dashboard" className="mt-1 inline-block text-sm text-accent hover:underline">
+                    Upload your first LAS file from the dashboard
+                  </Link>
+                ) : (
+                  <p className="text-sm text-accent mt-1">Upload your first LAS file above.</p>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left">
-                      <th className="py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                      <th className="py-3 px-4 text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                         Well Name
                       </th>
-                      <th className="py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                      <th className="py-3 px-4 text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                         API
                       </th>
-                      <th className="py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                      <th className="py-3 px-4 text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                         Depth Range
                       </th>
-                      <th className="py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                      <th className="py-3 px-4 text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                         HC Zones
                       </th>
-                      <th className="py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-text-dim">
+                      <th className="py-3 px-4 text-[10px] font-semibold uppercase tracking-widest text-text-dim">
                         Date
                       </th>
-                      <th className="py-3 px-4 font-mono text-[10px] uppercase tracking-widest text-text-dim text-right">
+                      <th className="py-3 px-4 text-[10px] font-semibold uppercase tracking-widest text-text-dim text-right">
                         Actions
                       </th>
                     </tr>
@@ -236,11 +306,8 @@ export default function Dashboard() {
                       <WellRow
                         key={w.id}
                         well={w}
-                        onDelete={(id) =>
-                          del.mutate(id, {
-                            onError: () => alert('Failed to delete well.'),
-                          })
-                        }
+                        deleting={del.isPending && del.variables === w.id}
+                        onDelete={setPendingDelete}
                       />
                     ))}
                   </tbody>
@@ -253,6 +320,17 @@ export default function Dashboard() {
           )}
         </div>
       </main>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete well"
+        message={`Delete well "${pendingDelete?.well_name ?? ''}" and all of its zones? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        loading={del.isPending}
+        onConfirm={confirmDelete}
+        onClose={() => setPendingDelete(null)}
+      />
     </div>
   )
 }

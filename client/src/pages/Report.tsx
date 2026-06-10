@@ -13,6 +13,7 @@ import Button from '@/components/ui/Button'
 import Logo from '@/components/layout/Logo'
 import SkeletonTrack from '@/components/ui/SkeletonTrack'
 import Spinner from '@/components/ui/Spinner'
+import { useToast } from '@/components/ui/Toast'
 import LogViewer, { type LogViewerHandle } from '@/components/tracks/LogViewer'
 import {
   useAddZone,
@@ -68,7 +69,7 @@ function WellLevelAISummary({ ai }: { ai: AIInterpretation | null }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-3 py-2.5 text-left font-mono text-[10px] uppercase tracking-widest text-text-dim transition-colors hover:bg-bg-deep hover:text-text"
+        className="flex w-full items-center justify-between px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-widest text-text-dim transition-colors hover:bg-bg-deep hover:text-text"
       >
         <span>Well-level AI summary</span>
         <svg
@@ -174,6 +175,7 @@ function rhsWidthBounds(bodyWidth: number): { min: number; max: number } {
 export default function Report() {
   const { wellId } = useParams<{ wellId: string }>()
   const navigate = useNavigate()
+  const toast = useToast()
   const { data, isLoading, isError } = useWell(wellId)
   const reanalyze = useReanalyzeWell(wellId)
   const logRef = useRef<LogViewerHandle | null>(null)
@@ -262,11 +264,14 @@ export default function Report() {
           setActiveZoneId(added.id)
           setAssistantContext({ type: 'zone', zoneId: added.id })
         }
+        toast.success(
+          `Added ${proposal.zone_type.toLowerCase()} zone ${proposal.top_ft.toFixed(0)}–${proposal.bot_ft.toFixed(0)} ft.`,
+        )
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'Could not add zone.')
+        toast.error(err instanceof Error ? err.message : 'Could not add zone.')
       }
     },
-    [wellId, addZone],
+    [wellId, addZone, toast],
   )
 
   const assistantZone =
@@ -376,7 +381,7 @@ export default function Report() {
       <div className="flex h-screen flex-col">
         <div className="flex min-h-[3.5rem] shrink-0 items-center gap-4 border-b border-border surface-header-bar px-[clamp(1rem,4vw,2rem)] py-2">
           <Logo size={28} />
-          <span className="font-mono text-xs text-text-dim">Loading well…</span>
+          <span className="text-xs text-text-dim">Loading well…</span>
         </div>
         <div className="flex flex-1 items-stretch">
           <div
@@ -412,8 +417,9 @@ export default function Report() {
     try {
       await reanalyze.mutateAsync(params)
       setReanalyzeOpen(false)
+      toast.success('Re-analysis complete.')
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Reanalysis failed.')
+      toast.error(err instanceof Error ? err.message : 'Reanalysis failed.')
     }
   }
 
@@ -440,13 +446,14 @@ export default function Report() {
   ].filter(Boolean) as { label: string; value: string }[]
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-bg overflow-hidden">
+    <div className="h-screen w-full flex flex-col bg-bg overflow-hidden">
       {/* Top header */}
       <header className="flex min-h-[3.5rem] shrink-0 items-center gap-4 border-b border-border surface-header-bar px-[clamp(0.75rem,4vw,1.25rem)] py-2">
         <button
           onClick={() => navigate('/dashboard')}
-          className="text-text-dim hover:text-accent transition-colors"
+          className="rounded p-1 text-text-dim hover:text-accent transition-colors"
           title="Back to dashboard"
+          aria-label="Back to dashboard"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -478,7 +485,7 @@ export default function Report() {
               aria-selected={view === 'logs'}
               onClick={() => setView('logs')}
               className={clsx(
-                'rounded px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest transition-colors',
+                'rounded px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors',
                 view === 'logs'
                   ? 'bg-accent/15 text-accent'
                   : 'text-text-dim hover:text-text-bright',
@@ -492,7 +499,7 @@ export default function Report() {
               aria-selected={view === 'crossplots'}
               onClick={() => setView('crossplots')}
               className={clsx(
-                'rounded px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest transition-colors',
+                'rounded px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors',
                 view === 'crossplots'
                   ? 'bg-accent/15 text-accent'
                   : 'text-text-dim hover:text-text-bright',
@@ -625,12 +632,12 @@ export default function Report() {
             >
               <div className="shrink-0 border-b border-border bg-bg-deep">
                 <div className="flex min-h-11 items-center border-b border-border-muted px-[clamp(0.6rem,4vw,1rem)]">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-accent">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-accent">
                     Pay zones &amp; interpretation
                   </span>
                 </div>
 
-                <div className="flex flex-wrap gap-x-[clamp(0.75rem,5vw,1.5rem)] gap-y-1 px-[clamp(0.6rem,4vw,1rem)] py-2 font-mono text-[10px] text-text-dim">
+                <div className="flex flex-wrap gap-x-[clamp(0.75rem,5vw,1.5rem)] gap-y-1 px-[clamp(0.6rem,4vw,1rem)] py-2 text-[10px] font-medium text-text-dim">
                   <span className="shrink-0">
                     Zones{' '}
                     <span className="tabular-nums text-text-bright">{data.zones.length}</span>

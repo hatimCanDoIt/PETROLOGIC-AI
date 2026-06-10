@@ -8,6 +8,7 @@ import Dashboard from '@/pages/Dashboard'
 import Report from '@/pages/Report'
 import Subscription from '@/pages/Subscription'
 import Billing from '@/pages/Billing'
+import Spinner from '@/components/ui/Spinner'
 import { useAuthStore } from '@/store/authStore'
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
@@ -33,7 +34,8 @@ function OAuthCallback() {
   }, [params, navigate, setSession])
 
   return (
-    <div className="flex h-screen items-center justify-center text-text-dim">
+    <div className="flex h-screen items-center justify-center gap-3 text-text-dim" role="status">
+      <Spinner size={18} />
       Completing sign-in&hellip;
     </div>
   )

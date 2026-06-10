@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 
@@ -52,29 +53,13 @@ const NAV: NavItem[] = [
   },
 ]
 
-const ACCOUNT_NAV: { to: string; label: string; icon: JSX.Element }[] = [
-  {
-    to: '/subscription',
-    label: 'Plans',
-    icon: (
-      <svg viewBox="0 0 24 24" className={ICON_CLASS} fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-      </svg>
-    ),
-  },
-  {
-    to: '/billing',
-    label: 'Billing',
-    icon: (
-      <svg viewBox="0 0 24 24" className={ICON_CLASS} fill="none" stroke="currentColor" strokeWidth="1.6">
-        <rect x="2" y="5" width="20" height="14" rx="2" />
-        <path d="M2 10h20" />
-      </svg>
-    ),
-  },
-]
+const LINK_CLASS = (active: boolean) =>
+  clsx(
+    'flex items-center gap-3 px-3 py-2 rounded-md font-semibold text-xs uppercase tracking-widest transition-colors',
+    active ? 'bg-accent/10 text-accent' : 'text-text-dim hover:text-text hover:bg-bg-deep',
+  )
 
-export default function Sidebar() {
+function NavSections({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
   const location = useLocation()
   const [params] = useSearchParams()
@@ -83,45 +68,12 @@ export default function Sidebar() {
     dashTabRaw === 'wells' || dashTabRaw === 'settings' ? dashTabRaw : 'overview'
 
   return (
-    <aside className="hidden md:flex w-[240px] shrink-0 flex-col border-r border-border surface-sidebar">
-      <div className="px-5 py-6">
-        <Logo size={28} />
-      </div>
-
-      <nav className="px-3 flex-1 flex flex-col gap-1">
+    <>
+      <nav className="px-3 flex-1 flex flex-col gap-1 overflow-y-auto">
         {NAV.map((item) => {
           const active = location.pathname === '/dashboard' && dashTab === item.tab
           return (
-            <NavLink
-              key={item.tab}
-              to={item.to}
-              className={clsx(
-                'flex items-center gap-3 px-3 py-2 rounded-md font-mono text-xs uppercase tracking-widest transition-colors',
-                active
-                  ? 'bg-accent/10 text-accent'
-                  : 'text-text-dim hover:text-text hover:bg-bg-deep',
-              )}
-            >
-              {item.icon}
-              {item.label}
-            </NavLink>
-          )
-        })}
-
-        <div className="my-2 border-t border-border pt-2" />
-        {ACCOUNT_NAV.map((item) => {
-          const active = location.pathname === item.to
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={clsx(
-                'flex items-center gap-3 px-3 py-2 rounded-md font-mono text-xs uppercase tracking-widest transition-colors',
-                active
-                  ? 'bg-accent/10 text-accent'
-                  : 'text-text-dim hover:text-text hover:bg-bg-deep',
-              )}
-            >
+            <NavLink key={item.tab} to={item.to} onClick={onNavigate} className={LINK_CLASS(active)}>
               {item.icon}
               {item.label}
             </NavLink>
@@ -131,8 +83,11 @@ export default function Sidebar() {
 
       <div className="border-t border-border px-3 py-3">
         <button
-          onClick={logout}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-md font-mono text-xs uppercase tracking-widest text-text-dim hover:text-gas hover:bg-bg-deep transition-colors"
+          onClick={() => {
+            onNavigate?.()
+            logout()
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-md font-semibold text-xs uppercase tracking-widest text-text-dim hover:text-gas hover:bg-bg-deep transition-colors"
         >
           <svg viewBox="0 0 24 24" className={ICON_CLASS} fill="none" stroke="currentColor" strokeWidth="1.6">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
@@ -141,11 +96,99 @@ export default function Sidebar() {
         </button>
         <div className="mt-3 px-3 py-2">
           <p className="text-sm text-text-bright">{user?.name || 'Petro User'}</p>
-          <p className="text-xs text-text-dim font-mono truncate">
-            {user?.email || ''}
-          </p>
+          <p className="text-xs text-text-dim truncate">{user?.email || ''}</p>
         </div>
       </div>
-    </aside>
+    </>
+  )
+}
+
+export default function Sidebar() {
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const openButtonRef = useRef<HTMLButtonElement>(null)
+  const location = useLocation()
+
+  // Close the drawer whenever the route changes (e.g. browser back).
+  useEffect(() => {
+    setDrawerOpen(false)
+  }, [location])
+
+  useEffect(() => {
+    if (!drawerOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawerOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    drawerRef.current
+      ?.querySelector<HTMLElement>('a, button')
+      ?.focus()
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.removeProperty('overflow')
+      openButtonRef.current?.focus()
+    }
+  }, [drawerOpen])
+
+  return (
+    <>
+      {/* Mobile header bar */}
+      <div className="md:hidden flex shrink-0 items-center justify-between border-b border-border surface-header-bar px-4 py-3">
+        <Logo size={26} />
+        <button
+          ref={openButtonRef}
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open navigation menu"
+          aria-expanded={drawerOpen}
+          className="rounded-md p-2 text-text-dim transition-colors hover:bg-bg-deep hover:text-text"
+        >
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Mobile drawer */}
+      {drawerOpen && (
+        <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Navigation menu">
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            tabIndex={-1}
+            onClick={() => setDrawerOpen(false)}
+            className="absolute inset-0 cursor-default surface-scrim backdrop-blur-sm"
+          />
+          <div
+            ref={drawerRef}
+            className="drawer-enter absolute inset-y-0 left-0 flex w-[min(18rem,85vw)] flex-col border-r border-border bg-bg-panel shadow-2xl"
+          >
+            <div className="flex items-center justify-between px-5 py-5">
+              <Logo size={26} />
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                aria-label="Close navigation menu"
+                className="rounded-md p-2 text-text-dim transition-colors hover:bg-bg-deep hover:text-text"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <NavSections onNavigate={() => setDrawerOpen(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex w-[240px] shrink-0 flex-col border-r border-border surface-sidebar">
+        <div className="px-5 py-6">
+          <Logo size={28} />
+        </div>
+        <NavSections />
+      </aside>
+    </>
   )
 }
