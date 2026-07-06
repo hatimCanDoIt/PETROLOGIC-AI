@@ -15,6 +15,7 @@ export const LOG_CURVE_STYLE_DEFAULTS: Record<LogCurveColorKey, LogCurveLineStyl
   rt: 'solid',
   nphi: 'solid',
   dphi: 'dashed',
+  phit: 'dashed',
   phie: 'solid',
   shc: 'solid',
   sw: 'solid',

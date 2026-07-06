@@ -413,7 +413,9 @@ export default function Report() {
     )
   }
 
-  const handleReanalyze = async (params: Partial<PetroParams>) => {
+  const handleReanalyze = async (
+    params: Partial<PetroParams> & { ai_tune_models?: boolean },
+  ) => {
     try {
       await reanalyze.mutateAsync(params)
       setReanalyzeOpen(false)

@@ -80,6 +80,7 @@ export type CurveArrays = {
   PEF: (number | null)[]
   SP?: (number | null)[]
   Vsh: (number | null)[]
+  phi_total?: (number | null)[]
   phi_eff: (number | null)[]
   Sw: (number | null)[]
   Shc: (number | null)[]
@@ -138,6 +139,27 @@ export interface ResultJson {
     raw_text?: string
     skipped?: string[]
   }
+  /** Present when the LLM model tuner ran on the last (re)analysis. */
+  regime_tuner?: {
+    model?: string
+    generated_at?: string
+    regime_count?: number
+    regimes?: {
+      top_ft: number
+      bot_ft: number
+      vsh_model: string
+      sw_model?: string | null
+      a?: number | null
+      m?: number | null
+      n?: number | null
+      Rw?: number | null
+      lithology?: string
+      rationale?: string
+    }[]
+    well_summary?: string | null
+    error?: string
+    skipped?: string[]
+  }
 }
 
 export interface AIZoneInterpretation {
@@ -171,6 +193,8 @@ export interface AIInterpretation {
   raw_text?: string
 }
 
+export type SwModel = 'archie' | 'simandoux' | 'indonesia'
+
 export interface PetroParams {
   rho_ma: number | null
   rho_fl: number
@@ -178,6 +202,7 @@ export interface PetroParams {
   a: number
   m: number
   n: number
+  sw_model?: SwModel
   GR_clean: number | null
   GR_shale: number | null
   Rt_cutoff: number

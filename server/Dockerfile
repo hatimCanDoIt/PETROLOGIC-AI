@@ -6,9 +6,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# ponytail: no apt toolchain — psycopg2-binary + asyncpg ship wheels; nothing
+# in requirements.txt compiles from source. Re-add gcc/libpq-dev only if a
+# future dep has no wheel.
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

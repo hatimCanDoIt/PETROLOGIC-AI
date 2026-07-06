@@ -105,7 +105,10 @@ export function useReanalyzeWell(wellId: string | undefined) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (
-      params: Partial<PetroParams> & { analysis_mode?: AnalysisMode },
+      params: Partial<PetroParams> & {
+        analysis_mode?: AnalysisMode
+        ai_tune_models?: boolean
+      },
     ) => {
       if (!wellId) throw new Error('No well id')
       try {

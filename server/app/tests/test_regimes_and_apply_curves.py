@@ -100,6 +100,31 @@ def test_per_regime_archie_m_changes_sw_only_in_window():
     np.testing.assert_allclose(base.Sw[bot], out.Sw[bot], equal_nan=True)
 
 
+def test_sw_models_shaly_sand_and_regime_scoping():
+    """Simandoux / Indonesia must lower Sw vs Archie in shaly rock (that is
+    their purpose: Archie over-reads Sw when shale conducts), stay in [0, 1],
+    and honor per-regime scoping."""
+    df, cm = _two_section_df()
+    kw = dict(rho_ma=2.71, Rw=0.1, GR_clean=20.0, GR_shale=120.0)
+    arch = run_petrophysics(df, cm, PetroParams(**kw))
+    sim = run_petrophysics(df, cm, PetroParams(sw_model="simandoux", **kw))
+    ind = run_petrophysics(df, cm, PetroParams(sw_model="indonesia", **kw))
+
+    bot = arch.depth >= 8050.0  # shaly section, Vsh ≈ 0.6
+    assert np.nanmean(arch.Sw[bot] - sim.Sw[bot]) > 0.05
+    assert np.nanmean(arch.Sw[bot] - ind.Sw[bot]) > 0.05
+    for r in (sim, ind):
+        ok = np.isfinite(r.Sw)
+        assert np.all((r.Sw[ok] >= 0.0) & (r.Sw[ok] <= 1.0))
+
+    # Regime-scoped Simandoux: bottom window changes, top stays pure Archie.
+    rgs = [Regime(top_ft=8050.0, bot_ft=8100.0, sw_model="simandoux")]
+    out = run_petrophysics(df, cm, PetroParams(**kw), regimes=rgs)
+    top = out.depth < 8050.0
+    np.testing.assert_allclose(arch.Sw[top], out.Sw[top], equal_nan=True)
+    np.testing.assert_allclose(sim.Sw[bot], out.Sw[bot], equal_nan=True)
+
+
 def test_apply_llm_curves_replaces_and_repicks_zones():
     df, cm = _two_section_df()
     p = PetroParams(rho_ma=2.71, Rw=0.1, GR_clean=20.0, GR_shale=120.0)

@@ -75,6 +75,10 @@ class ReanalyzeRequest(BaseModel):
     a: Optional[float] = Field(default=None, gt=0)
     m: Optional[float] = Field(default=None, gt=0)
     n: Optional[float] = Field(default=None, gt=0)
+    sw_model: Optional[Literal["archie", "simandoux", "indonesia"]] = None
+    # One-shot flag: let the LLM pick per-interval Vsh/Sw models + Archie
+    # params for this re-run. Not persisted as a parameter.
+    ai_tune_models: Optional[bool] = None
     GR_clean: Optional[float] = None
     GR_shale: Optional[float] = None
     Rt_cutoff: Optional[float] = Field(default=None, gt=0)

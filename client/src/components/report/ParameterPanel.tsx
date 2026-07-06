@@ -2,11 +2,13 @@ import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import type { PetroParams } from '@/types'
+import type { PetroParams, SwModel } from '@/types'
+
+export type ReanalyzeParams = Partial<PetroParams> & { ai_tune_models?: boolean }
 
 interface ParameterPanelProps {
   current: Partial<PetroParams>
-  onSubmit: (params: Partial<PetroParams>) => void | Promise<void>
+  onSubmit: (params: ReanalyzeParams) => void | Promise<void>
   loading?: boolean
   // Diagnostics from the result so we can show what auto-estimation used
   rhoMaAuto?: boolean
@@ -63,6 +65,7 @@ const DEFAULTS: PetroParams = {
   a: 1.0,
   m: 2.0,
   n: 2.0,
+  sw_model: 'archie',
   GR_clean: null,
   GR_shale: null,
   Rt_cutoff: 15.0,
@@ -82,6 +85,8 @@ interface FormState {
   a: number
   m: number
   n: number
+  sw_model: SwModel
+  ai_tune_models: boolean
   Rt_cutoff: number
   Shc_cutoff: number
   GR_clean: string
@@ -183,6 +188,8 @@ export default function ParameterPanel({
     a: merged.a,
     m: merged.m,
     n: merged.n,
+    sw_model: merged.sw_model ?? 'archie',
+    ai_tune_models: false,
     Rt_cutoff: merged.Rt_cutoff,
     Shc_cutoff: merged.Shc_cutoff,
     GR_clean: merged.GR_clean != null ? String(merged.GR_clean) : '',
@@ -193,18 +200,20 @@ export default function ParameterPanel({
     setForm((prev) => ({ ...prev, [k]: v }))
 
   const handleSubmit = () => {
-    const payload: Partial<PetroParams> = {
+    const payload: ReanalyzeParams = {
       // null explicitly clears the stored value → re-trigger auto on the server
       rho_ma: form.rho_ma_auto ? null : num(form.rho_ma_input),
       Rw: form.Rw_auto ? null : num(form.Rw_input),
       a: form.a,
       m: form.m,
       n: form.n,
+      sw_model: form.sw_model,
       Rt_cutoff: form.Rt_cutoff,
       Shc_cutoff: form.Shc_cutoff,
       GR_clean: num(form.GR_clean),
       GR_shale: num(form.GR_shale),
     }
+    if (form.ai_tune_models) payload.ai_tune_models = true
     onSubmit(payload)
   }
 
@@ -265,6 +274,24 @@ export default function ParameterPanel({
           max={3.0}
           step={0.05}
         />
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="sw-model-select"
+            className="text-[10px] font-semibold uppercase tracking-widest text-text-dim"
+          >
+            Sw model
+          </label>
+          <select
+            id="sw-model-select"
+            value={form.sw_model}
+            onChange={(e) => setForm_('sw_model', e.target.value as SwModel)}
+            className="w-full bg-bg-deep border border-border rounded px-2 py-1.5 font-mono text-xs text-text-bright focus:outline-none focus:border-accent"
+          >
+            <option value="archie">Archie (clean rock)</option>
+            <option value="simandoux">Simandoux (shaly sand, saline water)</option>
+            <option value="indonesia">Indonesia (shaly sand, fresh water)</option>
+          </select>
+        </div>
         <Slider
           label="Rt cutoff"
           value={form.Rt_cutoff}
@@ -303,6 +330,23 @@ export default function ParameterPanel({
           />
         </div>
       </div>
+
+      <label className="flex cursor-pointer items-start gap-2 select-none">
+        <input
+          type="checkbox"
+          checked={form.ai_tune_models}
+          onChange={(e) => setForm_('ai_tune_models', e.target.checked)}
+          className="mt-0.5 accent-accent"
+        />
+        <span className="text-xs text-text-dim">
+          <span className="font-semibold text-text-bright">
+            Let AI tune models per interval
+          </span>
+          {' — '}Claude reads the curves and picks the Vsh model, Sw equation
+          and Archie a/m/n for each geological interval. Overrides the global
+          choices above where regimes apply.
+        </span>
+      </label>
 
       <Button size="lg" className="w-full" loading={loading} onClick={handleSubmit}>
         Re-analyze

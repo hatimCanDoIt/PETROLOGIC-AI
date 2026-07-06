@@ -30,6 +30,7 @@ from ..core.ai_assistant import (
     build_assistant_context,
 )
 from ..core.ai_interpreter import get_ai_interpretation
+from ..core.ai_regime_tuner import run_llm_regime_tuner
 from ..core.ai_zone_picker import run_llm_zone_picker
 from ..core.pdf_report import build_report_html, build_report_pdf
 from ..core.petrophysics import summarize_zone_from_result
@@ -252,6 +253,7 @@ def _build_log_payload(
         "PEF": result.PEF,
         "SP": result.SP,
         "Vsh": result.Vsh,
+        "phi_total": result.phi_total,
         "phi_eff": result.phi_eff,
         "Sw": result.Sw,
         "Shc": result.Shc,
@@ -289,6 +291,7 @@ def _build_log_payload(
         "PEF": _arr_to_list(arrays["PEF"][ov_idx], decimals=3),
         "SP": _arr_to_list(arrays["SP"][ov_idx], decimals=2),
         "Vsh": _arr_to_list(arrays["Vsh"][ov_idx], decimals=4),
+        "phi_total": _arr_to_list(arrays["phi_total"][ov_idx], decimals=4),
         "phi_eff": _arr_to_list(arrays["phi_eff"][ov_idx], decimals=4),
         "Sw": _arr_to_list(arrays["Sw"][ov_idx], decimals=4),
         "Shc": _arr_to_list(arrays["Shc"][ov_idx], decimals=4),
@@ -314,6 +317,7 @@ def _build_log_payload(
                 "PEF": _arr_to_list(arrays["PEF"][idx], decimals=3),
                 "SP": _arr_to_list(arrays["SP"][idx], decimals=2),
                 "Vsh": _arr_to_list(arrays["Vsh"][idx], decimals=4),
+                "phi_total": _arr_to_list(arrays["phi_total"][idx], decimals=4),
                 "phi_eff": _arr_to_list(arrays["phi_eff"][idx], decimals=4),
                 "Sw": _arr_to_list(arrays["Sw"][idx], decimals=4),
                 "Shc": _arr_to_list(arrays["Shc"][idx], decimals=4),
@@ -498,6 +502,7 @@ async def _run_full_analysis(
     *,
     analysis_mode: str = "deterministic",
     las_raw_params: dict | None = None,
+    regimes: list | None = None,
 ) -> tuple[PetroResult, dict, dict | None]:
     """Run the petrophysics pipeline in the requested mode and tack on
     the AI narrative.
@@ -506,11 +511,14 @@ async def _run_full_analysis(
       • ``deterministic`` — numpy engine end-to-end; LLM only narrates.
       • ``llm``           — numpy curves; LLM picks the zones.
 
+    ``regimes`` (optional) are depth-bounded model overrides — e.g. from the
+    LLM regime tuner — passed straight into the numpy engine.
+
     Returns ``(result, ai_interpretation, picker_meta)``. ``picker_meta``
     is ``None`` for the deterministic mode and a dict for ``llm``.
     """
     result = run_petrophysics(
-        df, curve_map, params, las_raw_params=las_raw_params
+        df, curve_map, params, regimes=regimes, las_raw_params=las_raw_params
     )
 
     picker_meta: dict | None = None
@@ -990,6 +998,7 @@ async def reanalyze_well(
     # working unchanged.
     update = payload.model_dump(exclude_unset=True)
     update_mode = update.pop("analysis_mode", None)
+    ai_tune_models = bool(update.pop("ai_tune_models", False))
     for k, v in update.items():
         setattr(base, k, v)
 
@@ -1012,6 +1021,19 @@ async def reanalyze_well(
 
     las_raw = (rj.get("las_params") or {}) if isinstance(rj, dict) else {}
 
+    # Optional LLM model-tuning pre-pass: run the engine once with globals,
+    # let Claude pick per-interval Vsh / Sw models and Archie params from the
+    # resulting curves, then run the real analysis with those regimes.
+    regimes = None
+    tuner_meta: dict | None = None
+    if ai_tune_models:
+        pre = run_petrophysics(df, curve_map, base, las_raw_params=las_raw or None)
+        regimes, tuner_meta = await run_llm_regime_tuner(
+            pre, meta_for_ai, settings.ANTHROPIC_API_KEY
+        )
+        if not regimes:
+            regimes = None  # tuner failed → plain global-params analysis
+
     try:
         result, ai, zp_meta = await _run_full_analysis(
             df,
@@ -1020,6 +1042,7 @@ async def reanalyze_well(
             meta_for_ai,
             analysis_mode=mode,
             las_raw_params=las_raw or None,
+            regimes=regimes,
         )
     except Exception as exc:
         logger.exception("Reanalysis failure")
@@ -1051,6 +1074,8 @@ async def reanalyze_well(
         }
     if zp_meta is not None:
         log_payload["zone_picker"] = zp_meta
+    if tuner_meta is not None:
+        log_payload["regime_tuner"] = tuner_meta
 
     # Persist the resolved parameter set so subsequent re-analyses can start
     # from the same numbers — re-auto only happens when the caller explicitly
@@ -1188,6 +1213,7 @@ async def add_zone(
         "PEF": result.PEF,
         "SP": result.SP,
         "Vsh": result.Vsh,
+        "phi_total": result.phi_total,
         "phi_eff": result.phi_eff,
         "Sw": result.Sw,
         "Shc": result.Shc,
@@ -1207,6 +1233,7 @@ async def add_zone(
             "PEF": _arr_to_list(arrays["PEF"][idx], decimals=3),
             "SP": _arr_to_list(arrays["SP"][idx], decimals=2),
             "Vsh": _arr_to_list(arrays["Vsh"][idx], decimals=4),
+            "phi_total": _arr_to_list(arrays["phi_total"][idx], decimals=4),
             "phi_eff": _arr_to_list(arrays["phi_eff"][idx], decimals=4),
             "Sw": _arr_to_list(arrays["Sw"][idx], decimals=4),
             "Shc": _arr_to_list(arrays["Shc"][idx], decimals=4),
@@ -1356,6 +1383,7 @@ async def add_zone(
         "PEF": result.PEF,
         "SP": result.SP,
         "Vsh": result.Vsh,
+        "phi_total": result.phi_total,
         "phi_eff": result.phi_eff,
         "Sw": result.Sw,
         "Shc": result.Shc,
@@ -1375,6 +1403,7 @@ async def add_zone(
             "PEF": _arr_to_list(arrays["PEF"][idx], decimals=3),
             "SP": _arr_to_list(arrays["SP"][idx], decimals=2),
             "Vsh": _arr_to_list(arrays["Vsh"][idx], decimals=4),
+            "phi_total": _arr_to_list(arrays["phi_total"][idx], decimals=4),
             "phi_eff": _arr_to_list(arrays["phi_eff"][idx], decimals=4),
             "Sw": _arr_to_list(arrays["Sw"][idx], decimals=4),
             "Shc": _arr_to_list(arrays["Shc"][idx], decimals=4),

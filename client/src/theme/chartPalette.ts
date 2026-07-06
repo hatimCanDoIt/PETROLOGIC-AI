@@ -13,6 +13,9 @@ export const CURVE_PALETTE_BASE = {
   nphi: '#16a34a',
   /** Density-derived porosity — orange. */
   dphi: '#ea580c',
+  /** Total porosity — teal. */
+  phit: '#06b6d4',
+  phitFill: 'rgba(6, 182, 212, 0.10)',
   /** Effective porosity — purple (was same cyan as NPHI). */
   phie: '#9333ea',
   phieFill: 'rgba(147, 51, 234, 0.10)',

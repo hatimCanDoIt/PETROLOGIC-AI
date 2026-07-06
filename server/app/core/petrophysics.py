@@ -69,6 +69,8 @@ import pandas as pd
 
 VSH_MODELS = ("linear", "larionov_tertiary", "larionov_pre_tertiary", "clavier", "stieber")
 
+SW_MODELS = ("archie", "simandoux", "indonesia")
+
 
 def _vsh_from_igr(igr: np.ndarray, model: str) -> np.ndarray:
     """Convert a GR index array into a Vsh array using the named model.
@@ -116,6 +118,7 @@ class Regime:
     top_ft: float
     bot_ft: float
     vsh_model: str = "linear"
+    sw_model: Optional[str] = None  # archie | simandoux | indonesia; None → global
     a: Optional[float] = None
     m: Optional[float] = None
     n: Optional[float] = None
@@ -150,6 +153,7 @@ class PetroParams:
     a: float = 1.0                  # Archie tortuosity factor
     m: float = 2.0                  # Archie cementation exponent
     n: float = 2.0                  # Archie saturation exponent
+    sw_model: str = "archie"        # archie | simandoux | indonesia
     GR_clean: Optional[float] = None  # override; else auto from p10
     GR_shale: Optional[float] = None  # override; else auto from p90
     Rt_cutoff: float = 10.0           # ohm.m — pay if Rt > cutoff
@@ -181,6 +185,7 @@ class PetroResult:
     RT_shallow: np.ndarray
     RT_micro: np.ndarray
     Vsh: np.ndarray
+    phi_total: np.ndarray
     phi_eff: np.ndarray
     Sw: np.ndarray
     Shc: np.ndarray
@@ -875,6 +880,41 @@ def run_petrophysics(
     Sw_arch = np.where(np.isfinite(RT) & np.isfinite(phi_for_sw), Sw_arch, np.nan)
     Sw_arch = np.clip(Sw_arch, 0.0, 1.0)
 
+    # ----- alternative shaly-sand Sw models (Simandoux / Indonesia).
+    # ponytail: modified Simandoux keeps its standard Sw² form (n ignored);
+    # Indonesia honors n. The flushed-zone invasion merge below stays Archie.
+    sw_codes = {"archie": 0, "simandoux": 1, "indonesia": 2}
+    sw_mode = np.full(n, sw_codes.get(params.sw_model, 0), dtype=np.int8)
+    if regimes:
+        for r in regimes:
+            if r.sw_model in sw_codes:
+                mask = (depth >= r.top_ft) & (depth < r.bot_ft)
+                sw_mode[mask] = sw_codes[r.sw_model]
+    if np.any(sw_mode > 0):
+        # Shale resistivity: median deep RT in the shaliest rock on the log.
+        sh_mask = np.isfinite(RT) & np.isfinite(Vsh) & (Vsh > 0.8)
+        Rsh = float(np.median(RT[sh_mask])) if np.any(sh_mask) else 2.0
+        Rsh = float(np.clip(Rsh, 0.2, 100.0))
+        vsh_sw = np.clip(np.where(np.isfinite(Vsh), Vsh, 0.0), 0.0, 0.95)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # Modified Simandoux: 1/Rt = φ^m·Sw²/(a·Rw·(1−Vsh)) + Vsh·Sw/Rsh
+            A_sim = np.power(phi_for_sw, m_arr) / (a_arr * Rw_arr * (1.0 - vsh_sw))
+            B_sim = vsh_sw / Rsh
+            Sw_sim = (np.sqrt(B_sim * B_sim + 4.0 * A_sim / RT) - B_sim) / (
+                2.0 * A_sim
+            )
+            # Indonesia (Poupon–Leveaux):
+            # 1/√Rt = [Vsh^(1−Vsh/2)/√Rsh + φ^(m/2)/√(a·Rw)] · Sw^(n/2)
+            denom_ind = (
+                np.power(vsh_sw, 1.0 - vsh_sw / 2.0) / np.sqrt(Rsh)
+                + np.power(phi_for_sw, m_arr / 2.0) / np.sqrt(a_arr * Rw_arr)
+            )
+            Sw_ind = np.power(1.0 / (np.sqrt(RT) * denom_ind), 2.0 / n_arr)
+        ok_sw = np.isfinite(RT) & np.isfinite(phi_for_sw)
+        for code, alt in ((1, Sw_sim), (2, Sw_ind)):
+            alt = np.where(ok_sw & np.isfinite(alt), np.clip(alt, 0.0, 1.0), np.nan)
+            Sw_arch = np.where(sw_mode == code, alt, Sw_arch)
+
     sw_log = _extract(df, curve_map, "SW_INPUT", n)
     if np.any(np.isfinite(sw_log)):
         sl = sw_log[np.isfinite(sw_log)]
@@ -1055,6 +1095,7 @@ def run_petrophysics(
         PEF=PEF,
         SP=SP,
         Vsh=Vsh,
+        phi_total=phi_total,
         phi_eff=phi_eff,
         Sw=Sw,
         Shc=Shc,

@@ -1,0 +1,4 @@
+- Put the total porosity to confirm the PHIE calculation and therefore decide whether the LLM is picking the right Vsh model
+- Also make sure that the model is picking the right equations to calculate the water saturation  
+- Make the user in the UI choose the best LLM model 
+- Test if we can use different models in parallel and then run the best outcome (ex. run opus 4.8 and sonnet 4.6 and haiku 4 and then tell user the smartest model to pick which one is more reasonable) 

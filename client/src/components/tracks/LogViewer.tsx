@@ -625,6 +625,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     const rtColor = c('rt')
     const nphiColor = c('nphi')
     const dphiColor = c('dphi')
+    const phitColor = c('phit')
     const phieColor = c('phie')
     const shcColor = c('shc')
     const swColor = c('sw')
@@ -635,6 +636,7 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     const vshValues = overview.Vsh as (number | null)[]
     const nphiValues = overview.NPHI as (number | null)[]
     const dphiValues = overview.DPHI as (number | null)[]
+    const phitValues = (overview.phi_total ?? []) as (number | null)[]
     const phieValues = overview.phi_eff as (number | null)[]
     const rtValues = overview.RT as (number | null)[]
     const rtExtra = overview.rt_curves ?? {}
@@ -922,7 +924,41 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
               ]
             : [],
       },
-      // Track 5 — Saturation
+      // Track 5 — Total porosity (optional, off by default)
+      {
+        id: 'phit',
+        sidebarHint: 'Total porosity (PHIT) — before shale correction',
+        label: 'PHIT',
+        unit: 'v/v',
+        scaleLabel: ['0.0', '0.6'] as [string, string],
+        curves: [
+          {
+            depths: depths as number[],
+            values: phitValues,
+            color: phitColor,
+            colorKey: 'phit',
+            lineStyle: ls('phit'),
+            lineWidth: 1.6,
+            xMin: 0.0,
+            xMax: 0.6,
+            fillLeft: true,
+            fillColor: fillFromLineColor(phitColor, 0.10),
+            label: 'PHIT',
+          },
+          {
+            depths: depths as number[],
+            values: phieValues,
+            color: phieColor,
+            colorKey: 'phie',
+            lineStyle: ls('phie'),
+            lineWidth: 1.2,
+            xMin: 0.0,
+            xMax: 0.6,
+            label: 'PHIE',
+          },
+        ] as CurveConfig[],
+      },
+      // Track 6 — Saturation
       {
         id: 'sat',
         sidebarHint: 'Shc, Sw, BVW',
@@ -1034,7 +1070,8 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
       let changed = false
       for (const t of tracks) {
         if (next[t.id] === undefined) {
-          next[t.id] = true
+          // ponytail: phit is the only opt-in track; add a Set if more appear
+          next[t.id] = t.id !== 'phit'
           changed = true
         }
       }
@@ -1343,21 +1380,44 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
         </div>
 
         <div className="flex min-h-[1.75rem] min-w-0 flex-1 items-center gap-3 overflow-x-auto [scrollbar-width:thin]">
-          {tracks.map((t) => (
-            <label
+          {visibleTracks.map((t) => (
+            <span
               key={t.id}
-              className="flex shrink-0 cursor-pointer items-center gap-1.5 select-none whitespace-nowrap"
               title={[t.label, t.sidebarHint].filter(Boolean).join(' · ')}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-border-muted bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-text-bright whitespace-nowrap select-none"
             >
-              <input
-                type="checkbox"
-                className="accent-accent"
-                checked={trackVisible[t.id] !== false}
-                onChange={() => toggleTrackId(t.id)}
-              />
-              <span className="font-mono text-[10px] text-text-bright">{t.label}</span>
-            </label>
+              {t.label}
+              <button
+                type="button"
+                className="leading-none text-text-dim hover:text-oil"
+                title={`Remove ${t.label} track`}
+                onClick={() => toggleTrackId(t.id)}
+              >
+                ×
+              </button>
+            </span>
           ))}
+          {tracks.some((t) => trackVisible[t.id] === false) && (
+            <select
+              className="shrink-0 cursor-pointer rounded border border-border-muted bg-bg-elevated px-1 py-0.5 font-mono text-[10px] text-text-bright"
+              value=""
+              title="Add a track to the log display"
+              onChange={(e) => {
+                const v = e.target.value
+                if (v) toggleTrackId(v)
+                e.target.value = ''
+              }}
+            >
+              <option value="">+ add track</option>
+              {tracks
+                .filter((t) => trackVisible[t.id] === false)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+            </select>
+          )}
           {visibleTracks.length === 0 && (
             <span className="shrink-0 text-[10px] font-medium text-oil whitespace-nowrap">
               No tracks selected

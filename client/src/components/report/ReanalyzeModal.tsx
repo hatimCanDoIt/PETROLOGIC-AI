@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import ParameterPanel from '@/components/report/ParameterPanel'
+import ParameterPanel, { type ReanalyzeParams } from '@/components/report/ParameterPanel'
 import Button from '@/components/ui/Button'
 import type { PetroParams } from '@/types'
 
@@ -8,7 +8,7 @@ interface ReanalyzeModalProps {
   open: boolean
   onClose: () => void
   current: Partial<PetroParams>
-  onSubmit: (params: Partial<PetroParams>) => void | Promise<void>
+  onSubmit: (params: ReanalyzeParams) => void | Promise<void>
   loading?: boolean
   rhoMaAuto?: boolean
   rwAuto?: boolean
