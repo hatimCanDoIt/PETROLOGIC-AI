@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # "deterministic" → numpy engine, LLM only narrates the result.
 # "llm"           → numpy engine, LLM picks zones from the computed curves.
-AnalysisMode = Literal["deterministic", "llm"]
+# "numpy_only"    → numpy engine end-to-end, no LLM calls at all.
+AnalysisMode = Literal["deterministic", "llm", "numpy_only"]
 
 
 class HcZoneOut(BaseModel):

@@ -438,6 +438,8 @@ export default function Report() {
         switch (data.analysis_mode) {
           case 'llm':
             return `Numpy + LLM pay zones (${model})`
+          case 'numpy_only':
+            return 'Numpy only (no LLM)'
           default:
             return 'Numpy + LLM interpret'
         }

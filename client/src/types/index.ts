@@ -24,8 +24,9 @@ export interface TokenResponse {
  * Mirrors ``AnalysisMode`` in ``server/app/schemas/well.py``:
  *   - 'deterministic' → numpy engine; LLM only narrates.
  *   - 'llm'           → numpy curves; LLM picks zones from them.
+ *   - 'numpy_only'    → numpy engine only; no LLM calls at all.
  */
-export type AnalysisMode = 'deterministic' | 'llm'
+export type AnalysisMode = 'deterministic' | 'llm' | 'numpy_only'
 
 export interface HcZoneOut {
   id: string

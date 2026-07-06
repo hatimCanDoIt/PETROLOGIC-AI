@@ -236,7 +236,7 @@ async def get_ai_interpretation(
         return _fallback_error(f"anthropic SDK not installed: {exc}", payload)
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=key)
+        client = anthropic.AsyncAnthropic(api_key=key, timeout=45.0, max_retries=1)
         zone_count = len(payload.get("hc_zones") or [])
         brevity = ""
         if zone_count > 8:

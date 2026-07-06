@@ -459,7 +459,7 @@ def _well_to_detail(well: Well) -> WellDetail:
 # ---------------------------------------------------------------------------
 
 
-_ALLOWED_MODES = {"deterministic", "llm"}
+_ALLOWED_MODES = {"deterministic", "llm", "numpy_only"}
 # Retired experiment modes — treat as deterministic if still stored on a well.
 _LEGACY_MODES = {"llm_params", "llm_full"}
 
@@ -519,7 +519,10 @@ async def _run_full_analysis(
             result, meta_for_ai, settings.ANTHROPIC_API_KEY
         )
 
-    ai = await get_ai_interpretation(result, meta_for_ai, settings.ANTHROPIC_API_KEY)
+    if analysis_mode == "numpy_only":
+        ai = {"error": "AI interpretation skipped", "reason": "numpy_only mode — no LLM calls."}
+    else:
+        ai = await get_ai_interpretation(result, meta_for_ai, settings.ANTHROPIC_API_KEY)
     return result, ai, picker_meta
 
 

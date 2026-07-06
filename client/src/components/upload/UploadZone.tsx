@@ -14,6 +14,7 @@ type Stage = 'idle' | 'uploading' | 'analyzing' | 'done'
 const ANALYZING_LABEL: Record<AnalysisMode, string> = {
   deterministic: 'Running petrophysics + AI interpretation…',
   llm: 'Computing curves, Sonnet picking zones…',
+  numpy_only: 'Running petrophysics engine…',
 }
 
 const MODE_OPTIONS: { value: AnalysisMode; title: string; blurb: string }[] = [
@@ -28,6 +29,12 @@ const MODE_OPTIONS: { value: AnalysisMode; title: string; blurb: string }[] = [
     title: 'Numpy + LLM pay zones',
     blurb:
       'Numpy computes the curves; Claude Sonnet reads them and picks the pay zones. Per-zone numbers stay deterministic.',
+  },
+  {
+    value: 'numpy_only',
+    title: 'Numpy only (no LLM)',
+    blurb:
+      'Deterministic petrophysics engine only — no API calls, no credits used. Zones and curves computed entirely by NumPy.',
   },
 ]
 
