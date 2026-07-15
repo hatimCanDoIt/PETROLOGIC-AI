@@ -157,34 +157,20 @@ def _persist_raw_arrays(
     result: PetroResult,
     *,
     persist_las_df: Any | None,
-    curve_map: dict | None,
-    rt_mnemonics: list[str] | None = None,
 ) -> dict:
     """Store original LAS columns by mnemonic so reanalysis can rebuild the DataFrame."""
     raw: dict[str, list] = {"depth": _arr_to_list(result.depth, decimals=3)}
-    if persist_las_df is not None and curve_map:
-        seen: set[str] = set()
-        for _std, mnem in curve_map.items():
-            if not mnem or mnem in seen:
+    if persist_las_df is not None:
+        # Persist EVERY numeric LAS curve, not just the mapped ones — the log
+        # viewer lets users add any curve from the file as a track.
+        for col_name in persist_las_df.columns:
+            if str(col_name) == "DEPT" or str(col_name) in raw:
                 continue
-            seen.add(str(mnem))
-            if mnem in persist_las_df.columns:
-                raw[str(mnem)] = _arr_to_list(
-                    persist_las_df[mnem].to_numpy(dtype=np.float64),
-                    decimals=4,
-                )
-        rt_cols = find_resistivity_mnemonics(
-            [c for c in persist_las_df.columns if c != "DEPT"]
-        )
-        for mnem in rt_cols + list(rt_mnemonics or []):
-            if not mnem or mnem in seen:
-                continue
-            seen.add(str(mnem))
-            if mnem in persist_las_df.columns:
-                raw[str(mnem)] = _arr_to_list(
-                    persist_las_df[mnem].to_numpy(dtype=np.float64),
-                    decimals=4,
-                )
+            try:
+                arr = persist_las_df[col_name].to_numpy(dtype=np.float64)
+            except (TypeError, ValueError):
+                continue  # non-numeric curve (text remarks etc.)
+            raw[str(col_name)] = _arr_to_list(arr, decimals=4)
         return raw
     raw["GR"] = _arr_to_list(result.GR, decimals=3)
     raw["NPHI"] = _arr_to_list(result.NPHI, decimals=4)
@@ -374,8 +360,6 @@ def _build_log_payload(
         "raw_arrays": _persist_raw_arrays(
             result,
             persist_las_df=persist_las_df,
-            curve_map=curve_map,
-            rt_mnemonics=rt_mnemonics,
         ),
     }
 

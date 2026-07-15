@@ -1049,6 +1049,53 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
     if (spTrack) {
       base.splice(1, 0, spTrack)
     }
+
+    // Any LAS curve in raw_arrays not already on a track is addable from the
+    // "+ add track" dropdown (hidden by default), whatever its mnemonic.
+    const plottedMnemonics = new Set<string>([
+      ...Object.values(result.curve_map ?? {}).map(String),
+      ...selectedRtMnemonics,
+    ])
+    const rawDepth = rawArrays?.depth as number[] | undefined
+    if (rawDepth?.length) {
+      let extraIx = 0
+      for (const mnem of Object.keys(rawArrays ?? {})) {
+        if (mnem === 'depth' || plottedMnemonics.has(mnem)) continue
+        const rawVals = rawArrays?.[mnem]
+        if (!rawVals?.length) continue
+        const values = (overview.depth as (number | null)[]).map((d) =>
+          d == null ? null : nearestDepthSampleValue(rawDepth, rawVals, d),
+        )
+        const finite = values.filter(
+          (v): v is number => v != null && Number.isFinite(v),
+        )
+        if (!finite.length) continue
+        let lo = Math.min(...finite)
+        let hi = Math.max(...finite)
+        if (!(hi > lo)) hi = lo + 1
+        const pad = (hi - lo) * 0.05
+        lo -= pad
+        hi += pad
+        const color = RT_COMPARE_COLORS[extraIx++ % RT_COMPARE_COLORS.length]
+        base.push({
+          id: `raw-${mnem}`,
+          sidebarHint: 'Raw LAS curve',
+          label: mnem,
+          scaleLabel: [lo.toPrecision(3), hi.toPrecision(3)] as [string, string],
+          curves: [
+            {
+              depths: depths as number[],
+              values,
+              color,
+              lineWidth: 1.2,
+              xMin: lo,
+              xMax: hi,
+              label: mnem,
+            },
+          ] as CurveConfig[],
+        })
+      }
+    }
     return base
   }, [
     overview,
@@ -1070,8 +1117,8 @@ const LogViewer = forwardRef<LogViewerHandle, LogViewerProps>(function LogViewer
       let changed = false
       for (const t of tracks) {
         if (next[t.id] === undefined) {
-          // ponytail: phit is the only opt-in track; add a Set if more appear
-          next[t.id] = t.id !== 'phit'
+          // Opt-in tracks: PHIT and raw LAS curves start in the dropdown.
+          next[t.id] = t.id !== 'phit' && !t.id.startsWith('raw-')
           changed = true
         }
       }
